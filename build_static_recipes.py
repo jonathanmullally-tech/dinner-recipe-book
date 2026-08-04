@@ -28,7 +28,9 @@ import requests
 from bs4 import BeautifulSoup
 from PIL import Image, ImageOps
 
-ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_DIR = Path(__file__).resolve().parent
+# Support either repository-root placement or the original tools/ placement.
+ROOT = SCRIPT_DIR if (SCRIPT_DIR / "recipes-data.js").exists() else SCRIPT_DIR.parent
 DATA_FILE = ROOT / "recipes-data.js"
 OUTPUT_FILE = ROOT / "website-recipes.js"
 ASSET_FILE = ROOT / "website-assets.js"
