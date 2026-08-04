@@ -25,7 +25,7 @@ from typing import Any, Iterable
 from urllib.parse import quote_plus, urljoin, urlparse
 
 import requests
-from bs4 import BeautifulSoup
+ROOT = Path(__file__).resolve().parent
 from PIL import Image, ImageOps
 
 SCRIPT_DIR = Path(__file__).resolve().parent
