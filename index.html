@@ -16,7 +16,7 @@
   <div><h1>Dinner Recipe Book</h1><p>167 recipes · cookbook scans + website sync</p></div>
   <button id="syncBtn" class="primary">Sync website recipes</button>
 </header>
-<div id="syncPanel" class="sync-panel hidden">
+<div id="syncPanel" class="sync-panel hidden" hidden>
   <div class="sync-row"><strong id="syncLabel">Preparing sync…</strong><button id="cancelSync" class="quiet">Cancel</button></div>
   <progress id="syncProgress" max="100" value="0"></progress>
   <div id="syncDetail" class="muted"></div>
@@ -54,7 +54,7 @@
 </section>
 <section id="favoritesView" class="view"><div class="section-head"><h2>Favorites</h2></div><div id="favoriteGrid" class="recipe-grid"></div></section>
 <section id="settingsView" class="view">
-  <div class="settings-card"><h2>Offline library</h2><p id="libraryStats"></p><button id="syncMissing" class="primary">Download missing website recipes</button><button id="clearSynced" class="danger">Remove downloaded website recipes</button></div>
+  <div class="settings-card"><h2>Offline library</h2><p id="libraryStats"></p><p class="muted">Website downloads are intentionally paced to avoid rate limits and may take several minutes. Keep this page open while syncing.</p><button id="syncMissing" class="primary">Download / retry missing website recipes</button><button id="clearSynced" class="danger">Remove downloaded website recipes</button></div>
   <div class="settings-card"><h2>Backup</h2><p>Export favorites, ratings, notes, shopping selections and downloaded website recipe data.</p><div class="button-group"><button id="exportBackup" class="primary">Export backup</button><label class="file-button">Import backup<input id="importBackup" type="file" accept="application/json"></label></div></div>
   <div class="settings-card"><h2>Install on Android</h2><p>Open this site in Chrome, tap the three-dot menu, then choose <strong>Install app</strong> or <strong>Add to Home screen</strong>. After the website recipe sync completes, the text is stored on the phone for offline use.</p></div>
   <div class="settings-card"><h2>Source and accuracy</h2><p>Cookbook-exclusive recipes are transcribed from your photographs and include the scans for verification. Website recipes are downloaded directly on your device from the publisher's public recipe pages. OCR-draft entries are marked so they can be checked against the scan.</p></div>
@@ -63,5 +63,5 @@
 <div id="modal" class="modal hidden" role="dialog" aria-modal="true"><div class="modal-card"><button id="closeModal" class="close" aria-label="Close">×</button><div id="modalContent"></div></div></div>
 <div id="toast" class="toast hidden"></div>
 <script src="recipes-data.js"></script>
-<script src="app.js"></script>
+<script src="app.js?v=6"></script>
 </body></html>

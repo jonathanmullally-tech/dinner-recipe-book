@@ -1,0 +1,8 @@
+Replace these three files in the root of the GitHub repository:
+- app.js
+- index.html
+- sw.js
+
+This update prevents the sync panel from reopening by itself, adds a confirmation before bulk syncing, and makes Cancel stop the active request.
+
+After committing the files, wait for GitHub Pages to redeploy. Then fully close Chrome and reopen the recipe site. Refresh once if needed.
