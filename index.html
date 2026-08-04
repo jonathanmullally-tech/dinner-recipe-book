@@ -8,16 +8,16 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="assets/icon-192.png">
   <link rel="apple-touch-icon" href="assets/icon-192.png">
-  <link rel="stylesheet" href="styles.css?v=8">
+  <link rel="stylesheet" href="styles.css?v=9">
   <title>Dinner Recipe Book</title>
 </head>
 <body>
 <header class="topbar">
   <div>
     <h1>Dinner Recipe Book</h1>
-    <p>167 recipes · cookbook scans + website sync</p>
+    <p>167 recipes · cookbook scans + bundled website recipes</p>
   </div>
-  <button id="syncBtn" class="primary">Sync website recipes</button>
+  <button id="syncBtn" class="primary">Website library included</button>
 </header>
 
 <div id="syncPanel" class="sync-panel hidden" hidden>
@@ -60,7 +60,7 @@
             <label>Difficulty<select id="difficultyFilter"><option value="">Any difficulty</option><option>Easy</option><option>Moderate</option><option>Advanced</option></select></label>
             <label>Cooking method<select id="methodFilter"><option value="">Any method</option><option>Oven</option><option>Stovetop</option><option>Slow cooker</option><option>Air fryer</option><option>Barbecue / grill</option><option>No-cook</option><option>Pressure cooker</option><option>One-pot / one-pan</option></select></label>
             <label>Number of servings<select id="servingsFilter"><option value="">Any servings</option><option value="le2">1–2 servings</option><option value="3to4">3–4 servings</option><option value="ge5">5 or more servings</option></select></label>
-            <label>Source<select id="sourceFilter"><option value="">All sources</option><option value="bundled">Cookbook scans</option><option value="website">Website recipes</option><option value="synced">Downloaded website recipes</option></select></label>
+            <label>Source<select id="sourceFilter"><option value="">All sources</option><option value="bundled">Cookbook scans</option><option value="website">Website recipes</option><option value="synced">Available website recipes</option></select></label>
             <label>Book section<select id="sectionFilter"><option value="">Any book section</option></select></label>
             <label>Author / website<select id="authorFilter"><option value="">Any author / website</option></select></label>
           </div>
@@ -167,11 +167,13 @@
     <div class="settings-card">
       <h2>Offline library</h2>
       <p id="libraryStats"></p>
-      <p class="muted">Website downloads are intentionally paced to avoid rate limits and may take several minutes. Keep this page open while syncing.</p>
+      <p id="staticBuildStatus" class="muted">Checking the generated website recipe library…</p>
       <div class="settings-actions">
-        <button id="syncMissing" class="primary">Download / retry missing website recipes</button>
-        <button id="refreshSynced" class="quiet">Refresh downloaded recipes and food photos</button>
-        <button id="clearSynced" class="danger">Remove downloaded website recipes</button>
+        <button id="cacheStaticPhotos" class="primary">Save all bundled food photos offline</button>
+        <p id="photoCacheStatus" class="muted">Recipe text is available immediately. Food photos can be saved locally with this button.</p>
+        <button id="syncMissing" class="quiet">Download unresolved website recipes</button>
+        <button id="refreshSynced" class="quiet">Refresh old device downloads</button>
+        <button id="clearSynced" class="danger">Remove old device downloads</button>
       </div>
     </div>
     <div class="settings-card">
@@ -179,8 +181,8 @@
       <p>Export favorites, ratings, notes, personal labels, shopping selections, ingredient checkmarks and downloaded website recipe data.</p>
       <div class="button-group"><button id="exportBackup" class="primary">Export backup</button><label class="file-button">Import backup<input id="importBackup" type="file" accept="application/json"></label></div>
     </div>
-    <div class="settings-card"><h2>Install on Android</h2><p>Open this site in Chrome, tap the three-dot menu, then choose <strong>Install app</strong> or <strong>Add to Home screen</strong>. After the website recipe sync completes, the text and viewed food photos are stored on the phone for offline use.</p></div>
-    <div class="settings-card"><h2>Source and accuracy</h2><p>Cookbook-exclusive recipes are transcribed from your photographs and include the scans for verification. Website recipes are downloaded directly on your device from the publisher's public recipe pages. OCR-draft entries are marked so they can be checked against the scan.</p></div>
+    <div class="settings-card"><h2>Install on Android</h2><p>Open this site in Chrome, tap the three-dot menu, then choose <strong>Install app</strong> or <strong>Add to Home screen</strong>. The generated website recipe text is included with the app. Use “Save all bundled food photos offline” before relying on the gallery without internet access.</p></div>
+    <div class="settings-card"><h2>Source and accuracy</h2><p>Cookbook-exclusive recipes are transcribed from your photographs and include the scans for verification. Website recipes are generated from the publisher's public recipe pages by the repository workflow and bundled into the app. OCR-draft entries are marked so they can be checked against the scan.</p></div>
   </section>
 </main>
 
@@ -192,7 +194,9 @@
 </div>
 <div id="toast" class="toast hidden"></div>
 
-<script src="recipes-data.js"></script>
-<script src="app.js?v=8"></script>
+<script src="recipes-data.js?v=9"></script>
+<script src="website-recipes.js?v=9"></script>
+<script src="website-assets.js?v=9"></script>
+<script src="app.js?v=9"></script>
 </body>
 </html>

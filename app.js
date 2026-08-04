@@ -4,8 +4,12 @@
   const $ = selector => document.querySelector(selector);
   const $$ = selector => [...document.querySelectorAll(selector)];
   const BASE = window.RECIPE_INDEX || [];
+  const STATIC_WEBSITE = window.WEBSITE_RECIPES || {};
+  const STATIC_ASSETS = window.WEBSITE_ASSETS || [];
   const WEBSITE_SOURCE = 'Official RecipeTin Eats public recipe page';
   const WEB_COUNT = BASE.filter(recipe => recipe.source_type === WEBSITE_SOURCE).length;
+  const staticFor = recipeOrId => STATIC_WEBSITE[String(typeof recipeOrId === 'object' ? recipeOrId.id : recipeOrId)] || null;
+  const hasWebsiteData = recipeOrId => !!staticFor(recipeOrId) || !!synced[String(typeof recipeOrId === 'object' ? recipeOrId.id : recipeOrId)];
 
   const KEYS = {
     synced: 'rt_synced_v3',
@@ -38,6 +42,7 @@
 
   normalizePreferences();
   sanitizeSavedRecipes();
+  discardReplacedDeviceCopies();
 
   function normalizePreferences() {
     prefs.favorites ??= {};
@@ -68,11 +73,23 @@
     if (changed) save(KEYS.synced, synced);
   }
 
+  function discardReplacedDeviceCopies() {
+    let changed = false;
+    for (const id of Object.keys(STATIC_WEBSITE)) {
+      if (Object.prototype.hasOwnProperty.call(synced, id)) {
+        delete synced[id];
+        changed = true;
+      }
+    }
+    if (changed) save(KEYS.synced, synced);
+  }
+
   function mergeRecipe(recipe) {
     const userLabels = prefs.labels[recipe.id] || {};
+    const websiteVersion = staticFor(recipe) || synced[String(recipe.id)] || {};
     return {
       ...recipe,
-      ...(synced[recipe.id] || {}),
+      ...websiteVersion,
       favorite: !!prefs.favorites[recipe.id],
       user_rating: prefs.ratings[recipe.id] ?? null,
       user_notes: prefs.notes[recipe.id] || '',
@@ -85,7 +102,7 @@
 
   const allRecipes = () => BASE.map(mergeRecipe);
   const isWebsiteRecipe = recipe => recipe.source_type === WEBSITE_SOURCE;
-  const isDownloaded = recipe => !isWebsiteRecipe(recipe) || !!synced[recipe.id];
+  const isDownloaded = recipe => !isWebsiteRecipe(recipe) || hasWebsiteData(recipe);
 
   function toast(message) {
     const element = $('#toast');
@@ -408,7 +425,7 @@
     if (filters.query && !text.includes(filters.query)) return false;
     if (filters.source === 'bundled' && isWebsiteRecipe(recipe)) return false;
     if (filters.source === 'website' && !isWebsiteRecipe(recipe)) return false;
-    if (filters.source === 'synced' && !synced[recipe.id]) return false;
+    if (filters.source === 'synced' && !isDownloaded(recipe)) return false;
     if (filters.mealType && !mealTypesFor(recipe).includes(filters.mealType)) return false;
     if (filters.mainIngredient && !mainIngredientsFor(recipe).includes(filters.mainIngredient)) return false;
     if (filters.cuisine && recipe.cuisine !== filters.cuisine) return false;
@@ -486,7 +503,7 @@
 
   function recipeCard(recipe) {
     const statusBadge = isWebsiteRecipe(recipe)
-      ? (synced[recipe.id] ? '<span class="badge green">Downloaded</span>' : '<span class="badge orange">Needs sync</span>')
+      ? (staticFor(recipe) ? '<span class="badge green">Included</span>' : (synced[String(recipe.id)] ? '<span class="badge green">Downloaded</span>' : '<span class="badge orange">Not bundled yet</span>'))
       : '<span class="badge green">Cookbook scan</span>';
     const rating = prefs.ratings[recipe.id];
     const labels = recipe.user_labels || {};
@@ -518,8 +535,8 @@
   function render() {
     const recipes = filteredRecipes();
     $('#resultCount').textContent = `${recipes.length} recipe${recipes.length === 1 ? '' : 's'}`;
-    const downloaded = Object.keys(synced).filter(id => BASE.some(recipe => String(recipe.id) === String(id) && isWebsiteRecipe(recipe))).length;
-    $('#downloadCount').textContent = `${downloaded}/${WEB_COUNT} website recipes downloaded`;
+    const downloaded = BASE.filter(recipe => isWebsiteRecipe(recipe) && isDownloaded(recipe)).length;
+    $('#downloadCount').textContent = `${downloaded}/${WEB_COUNT} website recipes available`;
     $('#recipeGrid').innerHTML = recipes.length
       ? recipes.map(recipeCard).join('')
       : '<div class="empty">No recipes match those filters.</div>';
@@ -545,7 +562,7 @@
           ${photoMarkup(recipe)}
           <span class="gallery-caption"><strong>${esc(recipe.title)}</strong><small>${esc(imageKindFor(recipe) === 'mine' ? 'My meal photo' : imageKindFor(recipe) === 'publisher' ? 'Website photo' : 'Cookbook scan')}</small></span>
         </button>`).join('')
-      : '<div class="empty">No photos match those filters. Website recipes need to be downloaded before their food photos appear.</div>';
+      : '<div class="empty">No photos match those filters. Website food photos appear after the static library has been generated.</div>';
     bindRecipeCards();
   }
 
@@ -579,13 +596,13 @@
     const baseRecipe = BASE.find(recipe => recipe.id === id);
     if (!baseRecipe) return;
     let recipe = mergeRecipe(baseRecipe);
-    if (isWebsiteRecipe(recipe) && !synced[id]) {
+    if (isWebsiteRecipe(recipe) && !hasWebsiteData(id)) {
       showSyncPanel();
       $('#syncLabel').textContent = `Downloading ${recipe.title}`;
       $('#syncDetail').textContent = 'Finding the publisher recipe card…';
       try {
         const downloaded = await syncOne(recipe);
-        synced[id] = downloaded;
+        synced[String(id)] = downloaded;
         save(KEYS.synced, synced);
         recipe = mergeRecipe(baseRecipe);
         toast('Recipe downloaded for offline use');
@@ -1315,10 +1332,11 @@
   }
 
   function setSyncButtons(disabled) {
-    $('#syncBtn').disabled = disabled;
-    $('#syncMissing').disabled = disabled;
-    $('#refreshSynced').disabled = disabled;
-    $('#clearSynced').disabled = disabled;
+    const counts = websiteLibraryCounts();
+    $('#syncBtn').disabled = disabled || counts.missing === 0;
+    $('#syncMissing').disabled = disabled || counts.missing === 0;
+    $('#refreshSynced').disabled = disabled || counts.deviceCount === 0;
+    $('#clearSynced').disabled = disabled || counts.deviceCount === 0;
   }
 
   async function getWakeLock() {
@@ -1338,9 +1356,9 @@
       if (cancelSync) break;
       const recipe = targets[index];
       $('#syncLabel').textContent = `${labelPrefix} ${index + 1} of ${targets.length}`;
-      $('#syncDetail').textContent = `${recipe.title} · ${Object.keys(synced).length}/${WEB_COUNT} saved`;
+      $('#syncDetail').textContent = `${recipe.title} · ${websiteLibraryCounts().available}/${WEB_COUNT} available`;
       try {
-        synced[recipe.id] = await syncOne(recipe);
+        synced[String(recipe.id)] = await syncOne(recipe);
         save(KEYS.synced, synced);
         saved += 1;
       } catch (error) {
@@ -1369,12 +1387,12 @@
     try {
       const targets = BASE.filter(recipe => {
         if (!isWebsiteRecipe(recipe)) return false;
-        if (mode === 'missing') return !synced[recipe.id];
-        if (mode === 'downloaded') return !!synced[recipe.id];
+        if (mode === 'missing') return !hasWebsiteData(recipe);
+        if (mode === 'downloaded') return !staticFor(recipe) && !!synced[String(recipe.id)];
         return true;
       });
       if (!targets.length) {
-        toast(mode === 'missing' ? 'All website recipes are already downloaded' : 'There are no downloaded recipes to refresh');
+        toast(mode === 'missing' ? 'All website recipes are already available' : 'There are no old device downloads to refresh');
         return;
       }
       const first = await syncPass(targets, mode === 'downloaded' ? 'Refreshing' : 'Downloading');
@@ -1403,10 +1421,66 @@
     }
   }
 
+  async function cacheBundledFoodPhotos() {
+    if (!STATIC_ASSETS.length || !('caches' in window)) {
+      toast('No generated food photos are available yet');
+      return;
+    }
+    const button = $('#cacheStaticPhotos');
+    const status = $('#photoCacheStatus');
+    button.disabled = true;
+    let cached = 0;
+    try {
+      const cache = await caches.open('dinner-recipes-v9-static-photos');
+      for (let index = 0; index < STATIC_ASSETS.length; index += 6) {
+        const batch = STATIC_ASSETS.slice(index, index + 6);
+        await Promise.allSettled(batch.map(async path => {
+          const request = new Request(path, { cache: 'reload' });
+          const existing = await cache.match(request);
+          if (!existing) {
+            const response = await fetch(request);
+            if (response.ok) await cache.put(request, response.clone());
+          }
+          cached += 1;
+        }));
+        status.textContent = `Saving food photos ${Math.min(index + batch.length, STATIC_ASSETS.length)} of ${STATIC_ASSETS.length}…`;
+      }
+      status.textContent = `${cached} bundled food photos are ready for offline use.`;
+      toast('Food photos saved for offline use');
+    } catch (error) {
+      status.textContent = 'Photo caching was interrupted. Tap the button to resume.';
+      toast('Could not finish caching every photo');
+      console.warn(error);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  function websiteLibraryCounts() {
+    const staticCount = BASE.filter(recipe => isWebsiteRecipe(recipe) && !!staticFor(recipe)).length;
+    const deviceCount = BASE.filter(recipe => isWebsiteRecipe(recipe) && !staticFor(recipe) && !!synced[String(recipe.id)]).length;
+    return { staticCount, deviceCount, available: staticCount + deviceCount, missing: Math.max(0, WEB_COUNT - staticCount - deviceCount) };
+  }
+
   function renderStats() {
     const bundled = BASE.length - WEB_COUNT;
-    const downloaded = Object.keys(synced).filter(id => BASE.some(recipe => String(recipe.id) === String(id) && isWebsiteRecipe(recipe))).length;
-    $('#libraryStats').innerHTML = `<strong>${BASE.length}</strong> indexed recipes<br><strong>${bundled}</strong> cookbook-photo recipes bundled<br><strong>${downloaded} of ${WEB_COUNT}</strong> public website recipes downloaded for offline use`;
+    const counts = websiteLibraryCounts();
+    $('#libraryStats').innerHTML = `<strong>${BASE.length}</strong> indexed recipes<br><strong>${bundled}</strong> cookbook-photo recipes bundled<br><strong>${counts.staticCount} of ${WEB_COUNT}</strong> website recipes bundled with the app${counts.deviceCount ? `<br><strong>${counts.deviceCount}</strong> additional device-downloaded recipes` : ''}`;
+    $('#syncBtn').textContent = counts.missing ? `Get ${counts.missing} unresolved recipes` : 'Website library included';
+    $('#syncMissing').textContent = counts.missing ? `Download ${counts.missing} unresolved recipes` : 'All website recipes are bundled';
+    $('#syncBtn').disabled = counts.missing === 0 || syncRunning;
+    $('#syncMissing').disabled = counts.missing === 0 || syncRunning;
+    $('#refreshSynced').hidden = counts.deviceCount === 0;
+    $('#clearSynced').hidden = counts.deviceCount === 0;
+    const buildStatus = $('#staticBuildStatus');
+    if (buildStatus) buildStatus.textContent = counts.staticCount === WEB_COUNT
+      ? 'The recipe text and exact publisher links are already part of this website. No phone-by-phone recipe sync is required.'
+      : `${counts.staticCount} recipes are in the generated library. GitHub is still building or ${counts.missing} recipes need review.`;
+    const cacheButton = $('#cacheStaticPhotos');
+    if (cacheButton) cacheButton.disabled = STATIC_ASSETS.length === 0;
+    const photoStatus = $('#photoCacheStatus');
+    if (photoStatus && STATIC_ASSETS.length === 0) photoStatus.textContent = 'Food photos will become available after the GitHub library build finishes.';
+    else if (photoStatus && !/Saving|ready|interrupted/i.test(photoStatus.textContent)) photoStatus.textContent = `${STATIC_ASSETS.length} bundled food photos are available to save offline.`;
   }
 
   function exportBackup() {
@@ -1440,6 +1514,7 @@
         ingredientChecked = backup.ingredientChecked || {};
         normalizePreferences();
         sanitizeSavedRecipes();
+  discardReplacedDeviceCopies();
         save(KEYS.synced, synced);
         save(KEYS.prefs, prefs);
         save(KEYS.shopping, shopping);
@@ -1538,12 +1613,12 @@
 
   function requestMissingSync() {
     if (syncRunning) return;
-    if (confirm('Download the missing website recipes now? Keep this page open while the download runs.')) syncRecipes('missing');
+    if (confirm('Try downloading only the unresolved website recipes? The generated library is used first.')) syncRecipes('missing');
   }
 
   function requestRefreshSync() {
     if (syncRunning) return;
-    if (confirm('Refresh every downloaded website recipe? This replaces saved recipe text and re-selects the main food photo.')) syncRecipes('downloaded');
+    if (confirm('Refresh the remaining old device-downloaded recipes? Bundled recipes are not affected.')) syncRecipes('downloaded');
   }
 
   function init() {
@@ -1566,6 +1641,7 @@
     };
 
     $('#syncBtn').onclick = requestMissingSync;
+    $('#cacheStaticPhotos').onclick = cacheBundledFoodPhotos;
     $('#syncMissing').onclick = requestMissingSync;
     $('#refreshSynced').onclick = requestRefreshSync;
     $('#cancelSync').onclick = () => {
@@ -1575,7 +1651,7 @@
       $('#syncDetail').textContent = 'The current request is being cancelled.';
     };
     $('#clearSynced').onclick = () => {
-      if (confirm('Remove downloaded website recipe text from this device? Your favorites, notes and labels will remain.')) {
+      if (confirm('Remove old device-downloaded recipe text? Bundled website recipes will remain available. Your favorites, notes and labels will remain.')) {
         synced = {};
         save(KEYS.synced, synced);
         render();
@@ -1601,7 +1677,7 @@
     render();
     loadAllMealPhotos();
     window.addEventListener('pageshow', () => { if (!syncRunning) resetSyncUI(); });
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js?v=8').catch(console.warn);
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js?v=9').catch(console.warn);
   }
 
   init();
