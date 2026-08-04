@@ -1,15 +1,5 @@
-DINNER RECIPE BOOK - STATIC LIBRARY VERSION 9
-
-Upload everything in this folder to the ROOT of your existing GitHub repository.
-Be sure the hidden-looking .github folder and the tools folder are included.
-
-After committing:
-1. Open the repository's Actions tab.
-2. Wait for "Build static website recipe library" to finish with a green check.
-3. Wait for the automatic "Build static website recipe library" commit to appear.
-4. On the phone, open:
-   https://jonathanmullally-tech.github.io/dinner-recipe-book/update.html
-5. Return to Settings. It should report the number of website recipes bundled.
-
-When it reads 96 of 96, no recipe sync is required on the phone.
-Use "Save all bundled food photos offline" if you want every gallery image available without internet.
+1. Upload build_static_recipes.py and requirements.txt to the root of the dinner-recipe-book repository.
+2. In GitHub choose Add file > Create new file.
+3. In the filename box enter: .github/workflows/build-static-recipes.yml
+4. Copy all text from WORKFLOW_CONTENT.txt into the editor and commit directly to main.
+5. Open Actions and select Build static website recipe library, then Run workflow.
