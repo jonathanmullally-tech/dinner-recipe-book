@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#8e2d2d">
+  <meta name="description" content="Private offline cookbook and recipe manager">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="assets/icon-192.png">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+  <title>Dinner Recipe Book</title>
+</head>
+<body>
+<header class="topbar">
+  <div><h1>Dinner Recipe Book</h1><p>167 recipes · cookbook scans + website sync</p></div>
+  <button id="syncBtn" class="primary">Sync website recipes</button>
+</header>
+<div id="syncPanel" class="sync-panel hidden">
+  <div class="sync-row"><strong id="syncLabel">Preparing sync…</strong><button id="cancelSync" class="quiet">Cancel</button></div>
+  <progress id="syncProgress" max="100" value="0"></progress>
+  <div id="syncDetail" class="muted"></div>
+</div>
+<nav class="tabs" aria-label="Main views">
+  <button class="tab active" data-view="recipes">Recipes</button>
+  <button class="tab" data-view="shopping">Shopping <span id="shopCount">0</span></button>
+  <button class="tab" data-view="favorites">Favorites</button>
+  <button class="tab" data-view="settings">Settings</button>
+</nav>
+<main>
+<section id="recipesView" class="view active">
+  <div class="searchbox"><input id="searchInput" type="search" placeholder="Search recipes, ingredients, cuisine…" autocomplete="off"></div>
+  <div class="filters">
+    <select id="sourceFilter"><option value="">All sources</option><option value="bundled">Cookbook scans</option><option value="website">Website recipes</option><option value="synced">Downloaded website recipes</option></select>
+    <select id="proteinFilter"><option value="">Any protein</option></select>
+    <select id="sectionFilter"><option value="">Any book section</option></select>
+    <select id="ingredientFilter"><option value="">Any ingredient count</option><option value="eq2">Exactly 2 ingredients</option><option value="eq3">Exactly 3 ingredients</option><option value="le5">5 ingredients or fewer</option><option value="le10">10 ingredients or fewer</option><option value="le15">15 ingredients or fewer</option></select>
+    <select id="prepFilter"><option value="">Any prep time</option><option value="10">10 min or less</option><option value="20">20 min or less</option><option value="30">30 min or less</option></select>
+    <select id="cookFilter"><option value="">Any cook time</option><option value="10">10 min or less</option><option value="20">20 min or less</option><option value="30">30 min or less</option><option value="60">60 min or less</option></select>
+    <select id="ratingFilter"><option value="">Any personal rating</option><option value="8">8–10</option><option value="6">6–10</option><option value="1">Rated</option></select>
+  </div>
+  <div class="actions-row">
+    <button id="randomBtn" class="primary">🎲 Random from results</button>
+    <button id="clearFilters" class="quiet">Clear filters</button>
+  </div>
+  <div class="result-head"><strong id="resultCount"></strong><span id="downloadCount" class="muted"></span></div>
+  <div id="recipeGrid" class="recipe-grid"></div>
+</section>
+<section id="shoppingView" class="view">
+  <div class="section-head"><div><h2>Shopping list</h2><p class="muted">Ingredients are combined where the quantity and unit can be matched.</p></div><div class="button-group"><button id="shareShopping" class="quiet">Share</button><button id="printShopping" class="primary">Print / PDF</button></div></div>
+  <div id="shoppingRecipes"></div>
+  <div id="shoppingList" class="shopping-list"></div>
+  <button id="clearShopping" class="danger">Clear shopping list</button>
+</section>
+<section id="favoritesView" class="view"><div class="section-head"><h2>Favorites</h2></div><div id="favoriteGrid" class="recipe-grid"></div></section>
+<section id="settingsView" class="view">
+  <div class="settings-card"><h2>Offline library</h2><p id="libraryStats"></p><button id="syncMissing" class="primary">Download missing website recipes</button><button id="clearSynced" class="danger">Remove downloaded website recipes</button></div>
+  <div class="settings-card"><h2>Backup</h2><p>Export favorites, ratings, notes, shopping selections and downloaded website recipe data.</p><div class="button-group"><button id="exportBackup" class="primary">Export backup</button><label class="file-button">Import backup<input id="importBackup" type="file" accept="application/json"></label></div></div>
+  <div class="settings-card"><h2>Install on Android</h2><p>Open this site in Chrome, tap the three-dot menu, then choose <strong>Install app</strong> or <strong>Add to Home screen</strong>. After the website recipe sync completes, the text is stored on the phone for offline use.</p></div>
+  <div class="settings-card"><h2>Source and accuracy</h2><p>Cookbook-exclusive recipes are transcribed from your photographs and include the scans for verification. Website recipes are downloaded directly on your device from the publisher's public recipe pages. OCR-draft entries are marked so they can be checked against the scan.</p></div>
+</section>
+</main>
+<div id="modal" class="modal hidden" role="dialog" aria-modal="true"><div class="modal-card"><button id="closeModal" class="close" aria-label="Close">×</button><div id="modalContent"></div></div></div>
+<div id="toast" class="toast hidden"></div>
+<script src="recipes-data.js"></script>
+<script src="app.js"></script>
+</body></html>

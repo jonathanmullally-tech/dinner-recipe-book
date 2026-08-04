@@ -1,0 +1,22 @@
+{
+  "name": "Dinner Recipe Book",
+  "short_name": "Dinner Recipes",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#fbf6ef",
+  "theme_color": "#8e2d2d",
+  "description": "Private offline cookbook and shopping list app",
+  "icons": [
+    {
+      "src": "assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
