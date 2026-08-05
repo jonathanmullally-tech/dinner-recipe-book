@@ -257,10 +257,15 @@
     return /(?:nagi|maehashi|dozer|headshot|portrait|profile|author|avatar|about[-_ ]?me|logo|icon|favicon|newsletter|email-signup|placeholder|sprite|badge|tracking|pixel)/i.test(String(url || ''));
   }
 
+  function publisherFoodImageFor(recipe) {
+    const candidates = [recipe.image_url, recipe.publisher_image_url];
+    return candidates.find(url => url && !isSuspiciousImage(url)) || '';
+  }
+
   function imageFor(recipe) {
-    if (recipe.image_url && !isSuspiciousImage(recipe.image_url)) return recipe.image_url;
-    if (recipe.source_images?.length) return `assets/book/${recipe.source_images[0]}`;
-    return '';
+    // Cookbook page scans are reference material only. Never use them as the
+    // recipe card, detail hero, favourite, or gallery cover image.
+    return publisherFoodImageFor(recipe);
   }
 
   function displayedImageFor(recipe) {
@@ -269,8 +274,7 @@
 
   function imageKindFor(recipe) {
     if (mealPhotoUrls[recipe.id]) return 'mine';
-    if (recipe.image_url && !isSuspiciousImage(recipe.image_url)) return 'publisher';
-    if (recipe.source_images?.length) return 'cookbook';
+    if (publisherFoodImageFor(recipe)) return 'publisher';
     return '';
   }
 
@@ -562,7 +566,7 @@
           ${photoMarkup(recipe)}
           <span class="gallery-caption"><strong>${esc(recipe.title)}</strong><small>${esc(imageKindFor(recipe) === 'mine' ? 'My meal photo' : imageKindFor(recipe) === 'publisher' ? 'Website photo' : 'Cookbook scan')}</small></span>
         </button>`).join('')
-      : '<div class="empty">No photos match those filters. Website food photos appear after the static library has been generated.</div>';
+      : '<div class="empty">No food photos match those filters. Cookbook page scans are kept inside each recipe for reference and are not used as cover photos.</div>';
     bindRecipeCards();
   }
 

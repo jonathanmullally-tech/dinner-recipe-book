@@ -8,7 +8,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="assets/icon-192.png">
   <link rel="apple-touch-icon" href="assets/icon-192.png">
-  <link rel="stylesheet" href="styles.css?v=9">
+  <link rel="stylesheet" href="styles.css?v=10">
   <title>Dinner Recipe Book</title>
 </head>
 <body>
@@ -133,13 +133,12 @@
     <div class="gallery-toolbar">
       <div>
         <h2>Food gallery</h2>
-        <p class="muted">Tap a photo to open the recipe. Your own meal photo is shown first when one has been saved.</p>
+        <p class="muted">Tap a food photo to open the recipe. Your own meal photo is shown first when one has been saved. Cookbook page scans remain available inside the recipe for reference.</p>
       </div>
       <label>Photo source
         <select id="gallerySourceFilter">
           <option value="">All available photos</option>
           <option value="publisher">Website food photos</option>
-          <option value="cookbook">Cookbook scans</option>
           <option value="mine">My meal photos</option>
         </select>
       </label>
@@ -195,8 +194,8 @@
 <div id="toast" class="toast hidden"></div>
 
 <script src="recipes-data.js?v=9"></script>
-<script src="website-recipes.js?v=9"></script>
-<script src="website-assets.js?v=9"></script>
-<script src="app.js?v=9"></script>
+<script src="website-recipes.js?v=10"></script>
+<script src="website-assets.js?v=10"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>
