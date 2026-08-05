@@ -3,7 +3,9 @@
 
   const $ = selector => document.querySelector(selector);
   const $$ = selector => [...document.querySelectorAll(selector)];
-  const BASE = window.RECIPE_INDEX || [];
+  const DINNER_INDEX = window.RECIPE_INDEX || [];
+  const TONIGHT_INDEX = window.TONIGHT_INDEX || [];
+  const BASE = [...DINNER_INDEX, ...TONIGHT_INDEX];
   const STATIC_WEBSITE = window.WEBSITE_RECIPES || {};
   const STATIC_ASSETS = window.WEBSITE_ASSETS || [];
   const WEBSITE_SOURCE = 'Official RecipeTin Eats public recipe page';
@@ -39,6 +41,9 @@
   let activeFetchController = null;
   let lastReaderRequest = 0;
   let mealPhotoUrls = {};
+
+  const COOKBOOK_FOOD_CROPS = {"118":"assets/book-crops/118.jpg","57":"assets/book-crops/57.jpg","45":"assets/book-crops/45.jpg","128":"assets/book-crops/128.jpg","56":"assets/book-crops/56.jpg","143":"assets/book-crops/143.jpg","120":"assets/book-crops/120.jpg","71":"assets/book-crops/71.jpg","69":"assets/book-crops/69.jpg","140":"assets/book-crops/140.jpg","32":"assets/book-crops/32.jpg","64":"assets/book-crops/64.jpg","65":"assets/book-crops/65.jpg","78":"assets/book-crops/78.jpg","61":"assets/book-crops/61.jpg","130":"assets/book-crops/130.jpg","26":"assets/book-crops/26.jpg","48":"assets/book-crops/48.jpg","60":"assets/book-crops/60.jpg","94":"assets/book-crops/94.jpg","52":"assets/book-crops/52.jpg","79":"assets/book-crops/79.jpg","44":"assets/book-crops/44.jpg","75":"assets/book-crops/75.jpg","43":"assets/book-crops/43.jpg","121":"assets/book-crops/121.jpg","38":"assets/book-crops/38.jpg","86":"assets/book-crops/86.jpg","35":"assets/book-crops/35.jpg","144":"assets/book-crops/144.jpg","116":"assets/book-crops/116.jpg","122":"assets/book-crops/122.jpg","14":"assets/book-crops/14.jpg","91":"assets/book-crops/91.jpg","92":"assets/book-crops/92.jpg","131":"assets/book-crops/131.jpg","53":"assets/book-crops/53.jpg","34":"assets/book-crops/34.jpg"};
+
 
   normalizePreferences();
   sanitizeSavedRecipes();
@@ -231,6 +236,7 @@
     return [
       recipe.title,
       recipe.book_section,
+      recipe.book_name,
       recipe.cuisine,
       recipe.protein_type,
       ...(recipe.dietary_tags || []),
@@ -262,10 +268,16 @@
     return candidates.find(url => url && !isSuspiciousImage(url)) || '';
   }
 
+  function cookbookFoodImageFor(recipe) {
+    return COOKBOOK_FOOD_CROPS[String(recipe.id)] || '';
+  }
+
   function imageFor(recipe) {
-    // Cookbook page scans are reference material only. Never use them as the
-    // recipe card, detail hero, favourite, or gallery cover image.
-    return publisherFoodImageFor(recipe);
+    // Preferred order:
+    // 1) publisher website food photo
+    // 2) auto-cropped food photo taken from the user's cookbook page photos
+    // 3) no image / placeholder
+    return publisherFoodImageFor(recipe) || cookbookFoodImageFor(recipe);
   }
 
   function displayedImageFor(recipe) {
@@ -275,6 +287,7 @@
   function imageKindFor(recipe) {
     if (mealPhotoUrls[recipe.id]) return 'mine';
     if (publisherFoodImageFor(recipe)) return 'publisher';
+    if (cookbookFoodImageFor(recipe)) return 'cookbook-food';
     return '';
   }
 
@@ -364,8 +377,17 @@
     return [...result];
   }
 
+  function bookIdFor(recipe) {
+    if (recipe.book_id) return recipe.book_id;
+    // All original 167 entries belong to the Dinner cookbook, including the
+    // entries whose full text comes from the publisher website.
+    return 'dinner';
+  }
+
   function authorFor(recipe) {
-    return isWebsiteRecipe(recipe) ? 'RecipeTin Eats website' : 'RecipeTin: Dinner cookbook';
+    if (isWebsiteRecipe(recipe)) return 'RecipeTin Eats website';
+    if (bookIdFor(recipe) === 'tonight') return 'RecipeTin Eats: TONIGHT cookbook';
+    return 'RecipeTin: Dinner cookbook';
   }
 
   function totalMinutes(recipe) {
@@ -404,6 +426,7 @@
     return {
       query: $('#searchInput').value.trim().toLowerCase(),
       source: $('#sourceFilter').value,
+      book: $('#bookFilter').value,
       mealType: $('#mealTypeFilter').value,
       mainIngredient: $('#mainIngredientFilter').value,
       cuisine: $('#cuisineFilter').value,
@@ -427,9 +450,10 @@
   function matchesFilters(recipe, filters) {
     const text = recipeText(recipe);
     if (filters.query && !text.includes(filters.query)) return false;
+    if (filters.book && bookIdFor(recipe) !== filters.book) return false;
     if (filters.source === 'bundled' && isWebsiteRecipe(recipe)) return false;
     if (filters.source === 'website' && !isWebsiteRecipe(recipe)) return false;
-    if (filters.source === 'synced' && !isDownloaded(recipe)) return false;
+    if (filters.source === 'synced' && (!isWebsiteRecipe(recipe) || !isDownloaded(recipe))) return false;
     if (filters.mealType && !mealTypesFor(recipe).includes(filters.mealType)) return false;
     if (filters.mainIngredient && !mainIngredientsFor(recipe).includes(filters.mainIngredient)) return false;
     if (filters.cuisine && recipe.cuisine !== filters.cuisine) return false;
@@ -492,7 +516,7 @@
   function activeFilterTotal() {
     const state = filterState();
     return [
-      state.query, state.source, state.mealType, state.mainIngredient, state.cuisine,
+      state.query, state.source, state.book, state.mealType, state.mainIngredient, state.cuisine,
       state.totalTime, state.difficulty, state.method, state.servings, state.section,
       state.author, state.rating, state.ingredientCount, state.prep, state.cook
     ].filter(Boolean).length + state.ingredientsOnHand.length + state.dietary.length + state.practical.length + state.personal.length;
@@ -506,9 +530,11 @@
   }
 
   function recipeCard(recipe) {
-    const statusBadge = isWebsiteRecipe(recipe)
-      ? (staticFor(recipe) ? '<span class="badge green">Included</span>' : (synced[String(recipe.id)] ? '<span class="badge green">Downloaded</span>' : '<span class="badge orange">Not bundled yet</span>'))
-      : '<span class="badge green">Cookbook scan</span>';
+    const statusBadge = recipe.index_only
+      ? '<span class="badge">TONIGHT index</span>'
+      : (isWebsiteRecipe(recipe)
+        ? (staticFor(recipe) ? '<span class="badge green">Included</span>' : (synced[String(recipe.id)] ? '<span class="badge green">Downloaded</span>' : '<span class="badge orange">Not bundled yet</span>'))
+        : '<span class="badge green">Dinner cookbook</span>');
     const rating = prefs.ratings[recipe.id];
     const labels = recipe.user_labels || {};
     return `
@@ -529,7 +555,7 @@
             ${recipe.ingredient_count ? `<span>${recipe.ingredient_count} ingredients</span>` : ''}
           </div>
           <div class="card-actions">
-            <button class="open-btn" data-open="${recipe.id}">${isDownloaded(recipe) ? 'Open recipe' : 'Download recipe'}</button>
+            <button class="open-btn" data-open="${recipe.id}">${recipe.index_only ? 'Open index entry' : (isDownloaded(recipe) ? 'Open recipe' : 'Download recipe')}</button>
             <button class="heart-btn" data-heart="${recipe.id}" aria-label="Favorite">${prefs.favorites[recipe.id] ? '❤️' : '🤍'}</button>
           </div>
         </div>
@@ -564,7 +590,7 @@
       ? galleryRecipes.map(recipe => `
         <button class="gallery-card" data-open="${recipe.id}">
           ${photoMarkup(recipe)}
-          <span class="gallery-caption"><strong>${esc(recipe.title)}</strong><small>${esc(imageKindFor(recipe) === 'mine' ? 'My meal photo' : imageKindFor(recipe) === 'publisher' ? 'Website photo' : 'Cookbook scan')}</small></span>
+          <span class="gallery-caption"><strong>${esc(recipe.title)}</strong><small>${esc(imageKindFor(recipe) === 'mine' ? 'My meal photo' : imageKindFor(recipe) === 'publisher' ? 'Website photo' : imageKindFor(recipe) === 'cookbook-food' ? 'Cookbook food photo' : 'Cookbook scan')}</small></span>
         </button>`).join('')
       : '<div class="empty">No food photos match those filters. Cookbook page scans are kept inside each recipe for reference and are not used as cover photos.</div>';
     bindRecipeCards();
@@ -625,14 +651,28 @@
     document.body.style.overflow = 'hidden';
   }
 
+  function scanSourceFor(recipe, filename) {
+    if (recipe.source_image_base === 'embedded-tonight-index') {
+      return window.TONIGHT_INDEX_IMAGES?.[filename] || '';
+    }
+    return `assets/book/${filename}`;
+  }
+
   function sourceScans(recipe) {
     if (!recipe.source_images?.length) return '';
+    const label = recipe.index_only ? 'Cookbook index source' : 'Cookbook source scans';
+    const help = recipe.index_only
+      ? 'This photograph verifies the recipe title and page number. Upload the full recipe page later to add ingredients and directions.'
+      : 'Tap a scan to open it full size and verify the transcription.';
     return `
       <div class="panel scan-source">
-        <h3>Cookbook source scans</h3>
-        <p class="muted">Tap a scan to open it full size and verify the transcription.</p>
+        <h3>${label}</h3>
+        <p class="muted">${help}</p>
         <div class="scan-strip">
-          ${recipe.source_images.map(filename => `<a href="assets/book/${esc(filename)}" target="_blank"><img loading="lazy" src="assets/book/${esc(filename)}" alt="Cookbook page"></a>`).join('')}
+          ${recipe.source_images.map(filename => {
+            const source = scanSourceFor(recipe, filename);
+            return source ? `<a href="${source}" target="_blank"><img loading="lazy" src="${source}" alt="Cookbook page"></a>` : '';
+          }).join('')}
         </div>
       </div>`;
   }
@@ -699,6 +739,7 @@
           ${recipe.prep_minutes != null ? `<span>Prep ${fmtTime(recipe.prep_minutes)}</span>` : ''}
           ${recipe.cook_minutes != null ? `<span>Cook ${fmtTime(recipe.cook_minutes)}</span>` : ''}
         </div>
+        ${recipe.index_only ? `<p class="warning"><strong>TONIGHT index entry:</strong> This recipe is on page ${esc(recipe.book_page)}. The title and page number are saved offline; ingredients and directions will be added when you photograph that recipe page.</p>` : ''}
         ${recipe.transcription_quality?.includes('OCR') ? '<p class="warning"><strong>OCR draft:</strong> Check unclear quantities or wording against the included cookbook scan.</p>' : ''}
         <div class="detail-toolbar">
           <button id="favDetail">${prefs.favorites[recipe.id] ? '❤️ Favorite' : '🤍 Add favorite'}</button>
@@ -711,13 +752,13 @@
         <div class="detail-grid">
           <div>
             <div class="panel">
-              <div class="serving-control">
+              ${recipe.index_only ? '' : `<div class="serving-control">
                 <label><strong>Serving multiplier</strong><input id="servingFactor" type="number" min="0.25" max="12" step="0.25" value="${factor}"></label>
                 <div class="multiplier-buttons"><button type="button" data-factor="0.5">½×</button><button type="button" data-factor="1">1×</button><button type="button" data-factor="2">2×</button><button type="button" data-factor="3">3×</button></div>
-              </div>
-              <div class="ingredient-heading"><h3>Ingredients</h3><button id="clearIngredientChecks" class="text-button">Clear checks</button></div>
-              <ul class="ingredients" id="ingredientList">${ingredientListMarkup(recipe, factor)}</ul>
-              <button id="addShopping" class="primary full-width">${shopping[recipe.id] ? 'Update shopping list' : 'Add to shopping list'}</button>
+              </div>`}
+              <div class="ingredient-heading"><h3>Ingredients</h3>${recipe.index_only ? '' : '<button id="clearIngredientChecks" class="text-button">Clear checks</button>'}</div>
+              <ul class="ingredients" id="ingredientList">${recipe.index_only ? '<li class="muted">Ingredients are not available from the index page. Photograph this recipe page to add them.</li>' : ingredientListMarkup(recipe, factor)}</ul>
+              ${recipe.index_only ? '' : `<button id="addShopping" class="primary full-width">${shopping[recipe.id] ? 'Update shopping list' : 'Add to shopping list'}</button>`}
             </div>
             <div class="panel"><h3>Nutrition</h3>${nutrition}</div>
           </div>
@@ -725,7 +766,7 @@
           <div>
             <div class="panel">
               <h3>Directions</h3>
-              <ol class="steps">${steps.map(step => `<li>${step.heading ? `<span class="step-head">${esc(step.heading)} — </span>` : ''}${esc(step.text || step)}</li>`).join('') || '<li class="muted">Download this website recipe to view the directions.</li>'}</ol>
+              <ol class="steps">${steps.map(step => `<li>${step.heading ? `<span class="step-head">${esc(step.heading)} — </span>` : ''}${esc(step.text || step)}</li>`).join('') || `<li class="muted">${recipe.index_only ? `Directions are on page ${esc(recipe.book_page)} of TONIGHT. Photograph that page to add them offline.` : 'Download this website recipe to view the directions.'}</li>`}</ol>
             </div>
             ${recipe.notes?.length ? `<div class="panel"><h3>Recipe notes</h3><ul>${recipe.notes.map(note => `<li>${esc(note)}</li>`).join('')}</ul>${recipe.leftovers ? `<p><strong>Leftovers:</strong> ${esc(recipe.leftovers)}</p>` : ''}</div>` : ''}
             <div class="panel personal">
@@ -806,14 +847,15 @@
       toast('Cooking history updated');
     };
 
-    $('#servingFactor').oninput = event => {
+    const servingFactorInput = $('#servingFactor');
+    if (servingFactorInput) servingFactorInput.oninput = event => {
       const factor = Math.max(0.25, Number(event.target.value) || 1);
       updateScaledIngredients(factor);
     };
     $$('[data-factor]').forEach(button => {
       button.onclick = () => {
         const factor = Number(button.dataset.factor);
-        $('#servingFactor').value = factor;
+        if ($('#servingFactor')) $('#servingFactor').value = factor;
         updateScaledIngredients(factor);
       };
     });
@@ -827,7 +869,8 @@
       };
     });
 
-    $('#clearIngredientChecks').onclick = () => {
+    const clearIngredientChecks = $('#clearIngredientChecks');
+    if (clearIngredientChecks) clearIngredientChecks.onclick = () => {
       ingredientChecked[recipe.id] = {};
       save(KEYS.ingredientChecked, ingredientChecked);
       $$('[data-recipe-ingredient]').forEach(input => {
@@ -836,16 +879,17 @@
       });
     };
 
-    $('#addShopping').onclick = () => {
+    const addShopping = $('#addShopping');
+    if (addShopping) addShopping.onclick = () => {
       const factor = Math.max(0.25, Number($('#servingFactor').value) || 1);
       shopping[recipe.id] = { factor };
       save(KEYS.shopping, shopping);
       renderShopping();
       toast('Shopping list updated');
-      $('#addShopping').textContent = 'Update shopping list';
+      addShopping.textContent = 'Update shopping list';
     };
 
-    $('#shareRecipe').onclick = () => shareRecipe(recipe, Number($('#servingFactor').value) || 1);
+    $('#shareRecipe').onclick = () => shareRecipe(recipe, Number($('#servingFactor')?.value) || 1);
     $('#printRecipe').onclick = () => window.print();
     $('#mealPhotoInput').onchange = event => saveMealPhoto(recipe.id, event.target.files[0]);
   }
@@ -1467,9 +1511,12 @@
   }
 
   function renderStats() {
-    const bundled = BASE.length - WEB_COUNT;
+    const dinnerCount = DINNER_INDEX.filter(recipe => !isWebsiteRecipe(recipe)).length;
+    const tonightCount = TONIGHT_INDEX.length;
     const counts = websiteLibraryCounts();
-    $('#libraryStats').innerHTML = `<strong>${BASE.length}</strong> indexed recipes<br><strong>${bundled}</strong> cookbook-photo recipes bundled<br><strong>${counts.staticCount} of ${WEB_COUNT}</strong> website recipes bundled with the app${counts.deviceCount ? `<br><strong>${counts.deviceCount}</strong> additional device-downloaded recipes` : ''}`;
+    $('#libraryStats').innerHTML = `<strong>${BASE.length}</strong> indexed recipes<br><strong>${dinnerCount}</strong> Dinner cookbook recipes bundled<br><strong>${tonightCount}</strong> TONIGHT index entries bundled<br><strong>${counts.staticCount} of ${WEB_COUNT}</strong> website recipes bundled with the app${counts.deviceCount ? `<br><strong>${counts.deviceCount}</strong> additional device-downloaded recipes` : ''}`;
+    const headerSummary = $('#headerSummary');
+    if (headerSummary) headerSummary.textContent = `${BASE.length} recipes · Dinner + TONIGHT + website library`;
     $('#syncBtn').textContent = counts.missing ? `Get ${counts.missing} unresolved recipes` : 'Website library included';
     $('#syncMissing').textContent = counts.missing ? `Download ${counts.missing} unresolved recipes` : 'All website recipes are bundled';
     $('#syncBtn').disabled = counts.missing === 0 || syncRunning;
@@ -1485,6 +1532,18 @@
     const photoStatus = $('#photoCacheStatus');
     if (photoStatus && STATIC_ASSETS.length === 0) photoStatus.textContent = 'Food photos will become available after the GitHub library build finishes.';
     else if (photoStatus && !/Saving|ready|interrupted/i.test(photoStatus.textContent)) photoStatus.textContent = `${STATIC_ASSETS.length} bundled food photos are available to save offline.`;
+  }
+
+
+  function renderTonightBookCard() {
+    const images = window.TONIGHT_INDEX_IMAGES || {};
+    const cover = $('#tonightCover');
+    if (cover && images['cover.jpg']) cover.innerHTML = `<img src="${images['cover.jpg']}" alt="RecipeTin Eats TONIGHT cookbook cover">`;
+    const scans = $('#tonightIndexScans');
+    if (scans) scans.innerHTML = Object.entries(images)
+      .filter(([name]) => name !== 'cover.jpg')
+      .map(([name, source]) => `<a href="${source}" target="_blank"><img loading="lazy" src="${source}" alt="TONIGHT cookbook index page ${esc(name)}"></a>`)
+      .join('');
   }
 
   function exportBackup() {
@@ -1598,7 +1657,7 @@
 
   function clearFilters() {
     $('#searchInput').value = '';
-    ['sourceFilter', 'mealTypeFilter', 'mainIngredientFilter', 'cuisineFilter', 'totalTimeFilter', 'difficultyFilter', 'methodFilter', 'servingsFilter', 'sectionFilter', 'authorFilter', 'ratingFilter', 'ingredientFilter', 'prepFilter', 'cookFilter', 'gallerySourceFilter'].forEach(id => {
+    ['bookFilter', 'sourceFilter', 'mealTypeFilter', 'mainIngredientFilter', 'cuisineFilter', 'totalTimeFilter', 'difficultyFilter', 'methodFilter', 'servingsFilter', 'sectionFilter', 'authorFilter', 'ratingFilter', 'ingredientFilter', 'prepFilter', 'cookFilter', 'gallerySourceFilter'].forEach(id => {
       const element = $(`#${id}`);
       if (element) element.value = '';
     });
@@ -1609,7 +1668,7 @@
 
   function bindFilterEvents() {
     const inputIds = ['searchInput', 'ingredientsOnHand'];
-    const selectIds = ['sourceFilter', 'mealTypeFilter', 'mainIngredientFilter', 'cuisineFilter', 'totalTimeFilter', 'difficultyFilter', 'methodFilter', 'servingsFilter', 'sectionFilter', 'authorFilter', 'ratingFilter', 'ingredientFilter', 'prepFilter', 'cookFilter', 'gallerySourceFilter'];
+    const selectIds = ['bookFilter', 'sourceFilter', 'mealTypeFilter', 'mainIngredientFilter', 'cuisineFilter', 'totalTimeFilter', 'difficultyFilter', 'methodFilter', 'servingsFilter', 'sectionFilter', 'authorFilter', 'ratingFilter', 'ingredientFilter', 'prepFilter', 'cookFilter', 'gallerySourceFilter'];
     inputIds.forEach(id => $(`#${id}`).addEventListener('input', render));
     selectIds.forEach(id => $(`#${id}`).addEventListener('change', render));
     $$('[data-diet-filter], [data-practical-filter], [data-personal-filter]').forEach(input => input.addEventListener('change', render));
@@ -1628,6 +1687,7 @@
   function init() {
     resetSyncUI();
     populateFilters();
+    renderTonightBookCard();
     bindFilterEvents();
 
     $('#clearFilters').onclick = clearFilters;
@@ -1681,7 +1741,7 @@
     render();
     loadAllMealPhotos();
     window.addEventListener('pageshow', () => { if (!syncRunning) resetSyncUI(); });
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js?v=9').catch(console.warn);
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js?v=12').catch(console.warn);
   }
 
   init();

@@ -8,14 +8,14 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="assets/icon-192.png">
   <link rel="apple-touch-icon" href="assets/icon-192.png">
-  <link rel="stylesheet" href="styles.css?v=10">
-  <title>Dinner Recipe Book</title>
+  <link rel="stylesheet" href="styles.css?v=12">
+  <title>RecipeTin Offline Library</title>
 </head>
 <body>
 <header class="topbar">
   <div>
-    <h1>Dinner Recipe Book</h1>
-    <p>167 recipes · cookbook scans + bundled website recipes</p>
+    <h1>RecipeTin Offline Library</h1>
+    <p id="headerSummary">Loading cookbook library…</p>
   </div>
   <button id="syncBtn" class="primary">Website library included</button>
 </header>
@@ -60,6 +60,7 @@
             <label>Difficulty<select id="difficultyFilter"><option value="">Any difficulty</option><option>Easy</option><option>Moderate</option><option>Advanced</option></select></label>
             <label>Cooking method<select id="methodFilter"><option value="">Any method</option><option>Oven</option><option>Stovetop</option><option>Slow cooker</option><option>Air fryer</option><option>Barbecue / grill</option><option>No-cook</option><option>Pressure cooker</option><option>One-pot / one-pan</option></select></label>
             <label>Number of servings<select id="servingsFilter"><option value="">Any servings</option><option value="le2">1–2 servings</option><option value="3to4">3–4 servings</option><option value="ge5">5 or more servings</option></select></label>
+            <label>Cookbook<select id="bookFilter"><option value="">All cookbooks</option><option value="dinner">Dinner</option><option value="tonight">TONIGHT</option></select></label>
             <label>Source<select id="sourceFilter"><option value="">All sources</option><option value="bundled">Cookbook scans</option><option value="website">Website recipes</option><option value="synced">Available website recipes</option></select></label>
             <label>Book section<select id="sectionFilter"><option value="">Any book section</option></select></label>
             <label>Author / website<select id="authorFilter"><option value="">Any author / website</option></select></label>
@@ -175,6 +176,13 @@
         <button id="clearSynced" class="danger">Remove old device downloads</button>
       </div>
     </div>
+    <div class="settings-card" id="tonightBookCard">
+      <h2>RecipeTin Eats: TONIGHT</h2>
+      <p><strong>163</strong> recipes from the cookbook index are available offline for searching, filtering, favorites, ratings and notes.</p>
+      <p class="muted">These are index entries with page numbers. Ingredients and directions will appear as you add photographs of the individual recipe pages.</p>
+      <div id="tonightCover" class="tonight-cover"></div>
+      <details><summary>View the TONIGHT index photographs</summary><div id="tonightIndexScans" class="scan-strip"></div></details>
+    </div>
     <div class="settings-card">
       <h2>Backup</h2>
       <p>Export favorites, ratings, notes, personal labels, shopping selections, ingredient checkmarks and downloaded website recipe data.</p>
@@ -196,6 +204,8 @@
 <script src="recipes-data.js?v=9"></script>
 <script src="website-recipes.js?v=10"></script>
 <script src="website-assets.js?v=10"></script>
-<script src="app.js?v=10"></script>
+<script src="tonight-data.js?v=12"></script>
+<script src="tonight-index-images.js?v=12"></script>
+<script src="app.js?v=12"></script>
 </body>
 </html>
