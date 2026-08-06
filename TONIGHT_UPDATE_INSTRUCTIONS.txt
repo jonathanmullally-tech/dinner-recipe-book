@@ -1,0 +1,15 @@
+TONIGHT DIGITIZED UPDATE
+
+Upload these four files to the ROOT of your existing GitHub recipe-book repository:
+- tonight-data.js
+- app.js
+- index.html
+- sw.js
+
+Choose Replace when GitHub reports duplicate names, then commit the upload.
+After GitHub Pages finishes publishing, open update.html once and tap the update/reload button.
+
+Result: 160 of the 163 TONIGHT index entries have offline ingredients and directions.
+The three remaining entries are Sheet-Pan Chicken Fajitas (p22), Crispy Lemon Garlic Butter Chicken (p26), and Creamy Sausage Pasta (p28).
+Pages 26 and 28 include publisher links. Cookbook photos are not used as main food images.
+Some entries remain marked as OCR/photo-digitized drafts; check unclear fractions or wording against your original photographs.

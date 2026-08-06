@@ -531,10 +531,10 @@
 
   function recipeCard(recipe) {
     const statusBadge = recipe.index_only
-      ? '<span class="badge">TONIGHT index</span>'
+      ? `<span class="badge ${recipe.source_url ? 'orange' : ''}">${recipe.source_url ? 'Online only' : 'TONIGHT index'}</span>`
       : (isWebsiteRecipe(recipe)
         ? (staticFor(recipe) ? '<span class="badge green">Included</span>' : (synced[String(recipe.id)] ? '<span class="badge green">Downloaded</span>' : '<span class="badge orange">Not bundled yet</span>'))
-        : '<span class="badge green">Dinner cookbook</span>');
+        : `<span class="badge green">${bookIdFor(recipe) === 'tonight' ? 'TONIGHT cookbook' : 'Dinner cookbook'}</span>`);
     const rating = prefs.ratings[recipe.id];
     const labels = recipe.user_labels || {};
     return `
@@ -739,8 +739,8 @@
           ${recipe.prep_minutes != null ? `<span>Prep ${fmtTime(recipe.prep_minutes)}</span>` : ''}
           ${recipe.cook_minutes != null ? `<span>Cook ${fmtTime(recipe.cook_minutes)}</span>` : ''}
         </div>
-        ${recipe.index_only ? `<p class="warning"><strong>TONIGHT index entry:</strong> This recipe is on page ${esc(recipe.book_page)}. The title and page number are saved offline; ingredients and directions will be added when you photograph that recipe page.</p>` : ''}
-        ${recipe.transcription_quality?.includes('OCR') ? '<p class="warning"><strong>OCR draft:</strong> Check unclear quantities or wording against the included cookbook scan.</p>' : ''}
+        ${recipe.index_only ? `<p class="warning"><strong>${recipe.source_url ? 'Online-only entry' : 'TONIGHT index entry'}:</strong> ${recipe.source_url ? `This recipe is listed on page ${esc(recipe.book_page)}, but its ingredients and directions are not included offline. Open the publisher page above.` : `This recipe is on page ${esc(recipe.book_page)}. Its title and page number are saved offline, but no full recipe photograph was supplied.`}</p>` : ''}
+        ${recipe.transcription_quality?.includes('OCR') ? '<p class="warning"><strong>OCR draft:</strong> Check unclear quantities or wording against your original cookbook photograph.</p>' : ''}
         <div class="detail-toolbar">
           <button id="favDetail">${prefs.favorites[recipe.id] ? '❤️ Favorite' : '🤍 Add favorite'}</button>
           <button id="shareRecipe">Share</button>
@@ -757,7 +757,7 @@
                 <div class="multiplier-buttons"><button type="button" data-factor="0.5">½×</button><button type="button" data-factor="1">1×</button><button type="button" data-factor="2">2×</button><button type="button" data-factor="3">3×</button></div>
               </div>`}
               <div class="ingredient-heading"><h3>Ingredients</h3>${recipe.index_only ? '' : '<button id="clearIngredientChecks" class="text-button">Clear checks</button>'}</div>
-              <ul class="ingredients" id="ingredientList">${recipe.index_only ? '<li class="muted">Ingredients are not available from the index page. Photograph this recipe page to add them.</li>' : ingredientListMarkup(recipe, factor)}</ul>
+              <ul class="ingredients" id="ingredientList">${recipe.index_only ? `<li class="muted">${recipe.source_url ? 'Ingredients are available from the publisher page linked above.' : 'Ingredients are not available because no full recipe photograph was supplied.'}</li>` : ingredientListMarkup(recipe, factor)}</ul>
               ${recipe.index_only ? '' : `<button id="addShopping" class="primary full-width">${shopping[recipe.id] ? 'Update shopping list' : 'Add to shopping list'}</button>`}
             </div>
             <div class="panel"><h3>Nutrition</h3>${nutrition}</div>
@@ -766,7 +766,7 @@
           <div>
             <div class="panel">
               <h3>Directions</h3>
-              <ol class="steps">${steps.map(step => `<li>${step.heading ? `<span class="step-head">${esc(step.heading)} — </span>` : ''}${esc(step.text || step)}</li>`).join('') || `<li class="muted">${recipe.index_only ? `Directions are on page ${esc(recipe.book_page)} of TONIGHT. Photograph that page to add them offline.` : 'Download this website recipe to view the directions.'}</li>`}</ol>
+              <ol class="steps">${steps.map(step => `<li>${step.heading ? `<span class="step-head">${esc(step.heading)} — </span>` : ''}${esc(step.text || step)}</li>`).join('') || `<li class="muted">${recipe.index_only ? (recipe.source_url ? 'Directions are available from the publisher page linked above.' : `Directions are on page ${esc(recipe.book_page)} of TONIGHT, but no full recipe photograph was supplied.`) : 'Download this website recipe to view the directions.'}</li>`}</ol>
             </div>
             ${recipe.notes?.length ? `<div class="panel"><h3>Recipe notes</h3><ul>${recipe.notes.map(note => `<li>${esc(note)}</li>`).join('')}</ul>${recipe.leftovers ? `<p><strong>Leftovers:</strong> ${esc(recipe.leftovers)}</p>` : ''}</div>` : ''}
             <div class="panel personal">
@@ -1513,8 +1513,10 @@
   function renderStats() {
     const dinnerCount = DINNER_INDEX.filter(recipe => !isWebsiteRecipe(recipe)).length;
     const tonightCount = TONIGHT_INDEX.length;
+    const tonightComplete = TONIGHT_INDEX.filter(recipe => !recipe.index_only).length;
+    const tonightMissing = tonightCount - tonightComplete;
     const counts = websiteLibraryCounts();
-    $('#libraryStats').innerHTML = `<strong>${BASE.length}</strong> indexed recipes<br><strong>${dinnerCount}</strong> Dinner cookbook recipes bundled<br><strong>${tonightCount}</strong> TONIGHT index entries bundled<br><strong>${counts.staticCount} of ${WEB_COUNT}</strong> website recipes bundled with the app${counts.deviceCount ? `<br><strong>${counts.deviceCount}</strong> additional device-downloaded recipes` : ''}`;
+    $('#libraryStats').innerHTML = `<strong>${BASE.length}</strong> indexed recipes<br><strong>${dinnerCount}</strong> Dinner cookbook recipes bundled<br><strong>${tonightComplete} of ${tonightCount}</strong> TONIGHT entries include offline ingredients and directions${tonightMissing ? `<br><strong>${tonightMissing}</strong> TONIGHT entries remain online-only or index-only` : ''}<br><strong>${counts.staticCount} of ${WEB_COUNT}</strong> website recipes bundled with the app${counts.deviceCount ? `<br><strong>${counts.deviceCount}</strong> additional device-downloaded recipes` : ''}`;
     const headerSummary = $('#headerSummary');
     if (headerSummary) headerSummary.textContent = `${BASE.length} recipes · Dinner + TONIGHT + website library`;
     $('#syncBtn').textContent = counts.missing ? `Get ${counts.missing} unresolved recipes` : 'Website library included';
