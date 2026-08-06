@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -22,7 +22,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
           cache: pip
@@ -31,11 +31,92 @@ jobs:
       - name: Install builder dependencies
         run: python -m pip install --upgrade -r requirements.txt
 
+      - name: Check whether the generated library is complete
+        id: library
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          website_source = "Official RecipeTin Eats public recipe page"
+
+          data_text = Path("recipes-data.js").read_text(encoding="utf-8")
+          data_match = re.search(
+              r"window\.RECIPE_INDEX\s*=\s*(\[.*\]);\s*$",
+              data_text,
+              re.S,
+          )
+          target = 0
+          if data_match:
+              target = sum(
+                  recipe.get("source_type") == website_source
+                  for recipe in json.loads(data_match.group(1))
+              )
+
+          generated = 0
+          generated_file = Path("website-recipes.js")
+          if generated_file.exists():
+              generated_text = generated_file.read_text(encoding="utf-8")
+              generated_match = re.search(
+                  r"window\.WEBSITE_RECIPES\s*=\s*(\{.*\});?\s*$",
+                  generated_text,
+                  re.S,
+              )
+              if generated_match:
+                  generated = len(json.loads(generated_match.group(1)))
+
+          complete = target > 0 and generated >= target
+          print(f"Website recipes: {generated}/{target}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"complete={'true' if complete else 'false'}\n")
+          PY
+
       - name: Build static recipe data and food photos
+        if: steps.library.outputs.complete != 'true'
         run: python build_static_recipes.py
 
-      - name: Disable Jekyll processing
-        run: touch .nojekyll
+      - name: Save generated library in repository
+        if: steps.library.outputs.complete != 'true'
+        continue-on-error: true
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          paths=(website-recipes.js website-assets.js static-build-report.json)
+          if [ -d assets/website ]; then
+            paths+=(assets/website)
+          fi
+          git add -- "${paths[@]}"
+
+          if git diff --cached --quiet; then
+            echo "No generated changes to save."
+          else
+            git commit -m "Update bundled website recipes"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+
+      - name: Prepare lean Pages site
+        shell: bash
+        run: |
+          rm -rf _site
+          mkdir -p _site
+
+          for file in *.html *.css *.js *.json *.webmanifest CNAME; do
+            if [ -e "$file" ]; then
+              cp -p "$file" _site/
+            fi
+          done
+
+          cp -a assets _site/assets
+          touch _site/.nojekyll
+
+          echo "Prepared Pages site:"
+          du -sh _site
+          echo "Files: $(find _site -type f | wc -l)"
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
@@ -43,7 +124,8 @@ jobs:
       - name: Upload finished website
         uses: actions/upload-pages-artifact@v4
         with:
-          path: '.'
+          path: '_site'
+          include-hidden-files: true
 
   deploy:
     environment:
@@ -57,5 +139,3 @@ jobs:
       - name: Deploy finished website
         id: deployment
         uses: actions/deploy-pages@v4
-        with:
-          timeout: 1800000
