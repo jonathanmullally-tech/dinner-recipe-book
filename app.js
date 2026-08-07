@@ -18,7 +18,9 @@
     prefs: 'rt_prefs_v3',
     shopping: 'rt_shopping_v3',
     shoppingChecked: 'rt_checked_v3',
-    ingredientChecked: 'rt_recipe_checked_v4'
+    ingredientChecked: 'rt_recipe_checked_v4',
+    publicImages: 'rt_public_food_images_v1',
+    publicImageChecks: 'rt_public_food_image_checks_v2'
   };
 
   const load = (key, fallback) => {
@@ -35,6 +37,9 @@
   let shopping = load(KEYS.shopping, {});
   let shoppingChecked = load(KEYS.shoppingChecked, {});
   let ingredientChecked = load(KEYS.ingredientChecked, {});
+  let publicImages = load(KEYS.publicImages, {});
+  let publicImageChecks = load(KEYS.publicImageChecks, {});
+  let publicImageLookupRunning = false;
   let cancelSync = false;
   let syncRunning = false;
   let currentRecipe = null;
@@ -43,6 +48,25 @@
   let mealPhotoUrls = {};
 
   const COOKBOOK_FOOD_CROPS = {"118":"assets/book-crops/118.jpg","57":"assets/book-crops/57.jpg","45":"assets/book-crops/45.jpg","128":"assets/book-crops/128.jpg","56":"assets/book-crops/56.jpg","143":"assets/book-crops/143.jpg","120":"assets/book-crops/120.jpg","71":"assets/book-crops/71.jpg","69":"assets/book-crops/69.jpg","140":"assets/book-crops/140.jpg","32":"assets/book-crops/32.jpg","64":"assets/book-crops/64.jpg","65":"assets/book-crops/65.jpg","78":"assets/book-crops/78.jpg","61":"assets/book-crops/61.jpg","130":"assets/book-crops/130.jpg","26":"assets/book-crops/26.jpg","48":"assets/book-crops/48.jpg","60":"assets/book-crops/60.jpg","94":"assets/book-crops/94.jpg","52":"assets/book-crops/52.jpg","79":"assets/book-crops/79.jpg","44":"assets/book-crops/44.jpg","75":"assets/book-crops/75.jpg","43":"assets/book-crops/43.jpg","121":"assets/book-crops/121.jpg","38":"assets/book-crops/38.jpg","86":"assets/book-crops/86.jpg","35":"assets/book-crops/35.jpg","144":"assets/book-crops/144.jpg","116":"assets/book-crops/116.jpg","122":"assets/book-crops/122.jpg","14":"assets/book-crops/14.jpg","91":"assets/book-crops/91.jpg","92":"assets/book-crops/92.jpg","131":"assets/book-crops/131.jpg","53":"assets/book-crops/53.jpg","34":"assets/book-crops/34.jpg"};
+
+  // Official RecipeTin Eats pages whose public title differs from the TONIGHT
+  // book title. These are used only for prepared-food images. Local cookbook
+  // photographs are never considered for TONIGHT cards or galleries.
+  const PUBLIC_IMAGE_URL_HINTS = {
+    "1007": ["https://www.recipetineats.com/avocado-crema/"],
+    "1013": ["https://www.recipetineats.com/how-to-cook-basmati-rice/"],
+    "1017": ["https://www.recipetineats.com/how-to-cook-brown-rice/"],
+    "1019": ["https://www.recipetineats.com/cauliflower-rice/"],
+    "1020": ["https://www.recipetineats.com/real-chinese-all-purpose-stir-fry-sauce/"],
+    "1037": ["https://www.recipetineats.com/mashed-potato/"],
+    "1053": ["https://www.recipetineats.com/easy-yeast-bread-recipe-no-knead/"],
+    "1055": ["https://www.recipetineats.com/easy-soft-flatbread-yeast/"],
+    "1059": ["https://www.recipetineats.com/fluffy-coconut-rice/"],
+    "1081": ["https://www.recipetineats.com/how-to-cook-jasmine-rice/"],
+    "1118": ["https://www.recipetineats.com/vietnamese-rice-paper-rolls-spring-rolls/"],
+    "1163": ["https://www.recipetineats.com/how-to-cook-rice/"]
+  };
+
 
 
   normalizePreferences();
@@ -260,11 +284,11 @@
   }
 
   function isSuspiciousImage(url) {
-    return /(?:nagi|maehashi|dozer|headshot|portrait|profile|author|avatar|about[-_ ]?me|logo|icon|favicon|newsletter|email-signup|placeholder|sprite|badge|tracking|pixel)/i.test(String(url || ''));
+    return /(?:dozer|headshot|portrait|profile|author|avatar|about[-_ ]?me|logo|icon|favicon|newsletter|email-signup|placeholder|sprite|badge|tracking|pixel|book[-_ ]?cover|cookbook[-_ ]?cover)/i.test(String(url || ''));
   }
 
   function publisherFoodImageFor(recipe) {
-    const candidates = [recipe.image_url, recipe.publisher_image_url];
+    const candidates = [recipe.image_url, recipe.publisher_image_url, publicImages[String(recipe.id)]];
     return candidates.find(url => url && !isSuspiciousImage(url)) || '';
   }
 
@@ -273,11 +297,12 @@
   }
 
   function imageFor(recipe) {
-    // Preferred order:
-    // 1) publisher website food photo
-    // 2) auto-cropped food photo taken from the user's cookbook page photos
-    // 3) no image / placeholder
-    return publisherFoodImageFor(recipe) || cookbookFoodImageFor(recipe);
+    // TONIGHT covers use only public publisher food photographs. The user's
+    // cookbook-page photographs remain source scans inside the recipe and are
+    // never used as TONIGHT card or gallery images.
+    const publisherImage = publisherFoodImageFor(recipe);
+    if (bookIdFor(recipe) === 'tonight') return publisherImage;
+    return publisherImage || cookbookFoodImageFor(recipe);
   }
 
   function displayedImageFor(recipe) {
@@ -287,8 +312,115 @@
   function imageKindFor(recipe) {
     if (mealPhotoUrls[recipe.id]) return 'mine';
     if (publisherFoodImageFor(recipe)) return 'publisher';
-    if (cookbookFoodImageFor(recipe)) return 'cookbook-food';
+    if (bookIdFor(recipe) !== 'tonight' && cookbookFoodImageFor(recipe)) return 'cookbook-food';
     return '';
+  }
+
+  function publicImageCandidates(recipe) {
+    const title = String(recipe.title || '');
+    const withoutParentheses = title.replace(/\s*\([^)]*\)\s*/g, ' ').trim();
+    const beforeSubtitle = title.split(/[—–:]/)[0].trim();
+    const raw = slugify(title);
+    const variants = [
+      raw,
+      slugify(withoutParentheses),
+      slugify(beforeSubtitle),
+      raw.replace(/^(the|my)-/, '')
+    ].filter(Boolean);
+    const officialGuesses = variants.map(slug => `https://www.recipetineats.com/${slug}/`);
+    const hints = PUBLIC_IMAGE_URL_HINTS[String(recipe.id)] || [];
+    return [...new Set([
+      ...(recipe.source_url ? [{ url: recipe.source_url, trusted: true }] : []),
+      ...hints.map(url => ({ url, trusted: true })),
+      ...officialGuesses.map(url => ({ url, trusted: false }))
+    ].map(candidate => JSON.stringify(candidate)))].map(value => JSON.parse(value));
+  }
+
+  async function metadataFoodImage(recipe, candidate) {
+    const endpoint = `https://api.microlink.io/?url=${encodeURIComponent(candidate.url)}&palette=false&audio=false&video=false`;
+    const response = await fetch(endpoint, { cache: 'force-cache' });
+    if (!response.ok) throw new Error(`Metadata request failed (${response.status})`);
+    const payload = await response.json();
+    const data = payload?.data || {};
+    const image = data.image;
+    const imageUrl = image?.url;
+    const pageTitle = String(data.title || '');
+    const finalUrl = String(data.url || candidate.url);
+    if (/404|not found|page not found/i.test(pageTitle)) return '';
+
+    const titleScore = overlapScore(recipe.title, pageTitle);
+    const pathScore = urlScore(finalUrl, recipe.title);
+    const titleMatches = candidate.trusted
+      ? (!pageTitle || titleScore >= 0.24 || pathScore >= 0.45)
+      : (titleScore >= 0.42 || (titleScore >= 0.30 && pathScore >= 0.65));
+    const largeEnough = !image?.width || !image?.height || Math.max(Number(image.width), Number(image.height)) >= 500;
+    if (!/^https?:\/\//i.test(String(imageUrl || '')) || !titleMatches || !largeEnough || isSuspiciousImage(imageUrl)) return '';
+    return imageUrl;
+  }
+
+  async function resolvePublicFoodImages() {
+    if (publicImageLookupRunning || !navigator.onLine) return;
+    const retryAfterMs = 21 * 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    const allMissing = BASE.filter(recipe => {
+      if (bookIdFor(recipe) !== 'tonight' || publisherFoodImageFor(recipe)) return false;
+      const lastCheck = Number(publicImageChecks[String(recipe.id)] || 0);
+      return !lastCheck || now - lastCheck >= retryAfterMs;
+    }).sort((left, right) => {
+      const leftPriority = left.source_url || PUBLIC_IMAGE_URL_HINTS[String(left.id)] ? 0 : 1;
+      const rightPriority = right.source_url || PUBLIC_IMAGE_URL_HINTS[String(right.id)] ? 0 : 1;
+      return leftPriority - rightPriority || Number(left.book_page || 9999) - Number(right.book_page || 9999);
+    });
+    if (!allMissing.length) return;
+
+    // Work in phone-friendly batches. When one batch completes, the next one
+    // starts automatically while the app remains open and online.
+    const queue = allMissing.slice(0, 30);
+    publicImageLookupRunning = true;
+    let nextIndex = 0;
+    let added = 0;
+
+    const worker = async () => {
+      while (nextIndex < queue.length) {
+        const recipe = queue[nextIndex++];
+        const id = String(recipe.id);
+        let hadTransientFailure = false;
+        try {
+          for (const candidate of publicImageCandidates(recipe)) {
+            try {
+              const imageUrl = await metadataFoodImage(recipe, candidate);
+              if (imageUrl) {
+                publicImages[id] = imageUrl;
+                added += 1;
+                break;
+              }
+            } catch (error) {
+              hadTransientFailure = true;
+              console.warn(`Food photo candidate failed for ${recipe.title}`, candidate.url, error);
+            }
+          }
+          if (!hadTransientFailure || publicImages[id]) publicImageChecks[id] = Date.now();
+        } catch (error) {
+          console.warn(`Food photo lookup failed for ${recipe.title}`, error);
+        }
+      }
+    };
+
+    try {
+      await Promise.all(Array.from({ length: Math.min(3, queue.length) }, () => worker()));
+      save(KEYS.publicImages, publicImages);
+      save(KEYS.publicImageChecks, publicImageChecks);
+      if (added) {
+        render();
+        toast(`${added} more official food photo${added === 1 ? '' : 's'} added`);
+      }
+    } finally {
+      publicImageLookupRunning = false;
+      const remaining = BASE.some(recipe => bookIdFor(recipe) === 'tonight'
+        && !publisherFoodImageFor(recipe)
+        && !publicImageChecks[String(recipe.id)]);
+      if (remaining && navigator.onLine) setTimeout(resolvePublicFoodImages, 12000);
+    }
   }
 
   function mealTypesFor(recipe) {
@@ -1742,8 +1874,9 @@
 
     render();
     loadAllMealPhotos();
+    resolvePublicFoodImages();
     window.addEventListener('pageshow', () => { if (!syncRunning) resetSyncUI(); });
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js?v=12').catch(console.warn);
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js?v=15').catch(console.warn);
   }
 
   init();
