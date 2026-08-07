@@ -317,14 +317,48 @@
     return GENERATED_FOOD_IMAGES[String(recipe.id)] || '';
   }
 
+  // Full-library fallback: every recipe receives a stable prepared-food photo
+  // without requiring an API key. LoremFlickr serves Creative Commons Flickr
+  // photos, supports keyword searches, and can lock a URL to a stable result.
+  const FALLBACK_PHOTO_STOP_WORDS = new Set([
+    'the','and','with','from','into','your','this','that','for','plus','style','recipe',
+    'easy','quick','speedy','simple','best','perfect','amazing','magnificent','ultimate',
+    'minute','minutes','second','seconds','one','two','three','four','five','my','our',
+    'of','to','in','on','at','by','pan','pot','baked','crispy','creamy'
+  ]);
+
+  function fallbackPhotoKeywords(recipe) {
+    const titleTokens = slugify(recipe.title || '')
+      .split('-')
+      .filter(token => token.length > 2 && !/^\d+$/.test(token) && !FALLBACK_PHOTO_STOP_WORDS.has(token));
+    const ingredientTokens = (recipe.ingredients || [])
+      .slice(0, 8)
+      .flatMap(item => slugify(typeof item === 'string' ? item : (item.item || '')).split('-'))
+      .filter(token => token.length > 3 && !/^\d+$/.test(token) && !FALLBACK_PHOTO_STOP_WORDS.has(token));
+    const useful = [...new Set([...titleTokens, ...ingredientTokens])].slice(0, 5);
+    return ['food', 'meal', ...useful];
+  }
+
+  function fallbackPhotoLock(recipe) {
+    const text = `${recipe.id}|${recipe.title || ''}`;
+    let hash = 2166136261;
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return ((hash >>> 0) % 2000000000) + 1;
+  }
+
+  function fallbackWebFoodImageFor(recipe) {
+    const keywords = fallbackPhotoKeywords(recipe).map(encodeURIComponent).join(',');
+    return `https://loremflickr.com/640/420/${keywords}?lock=${fallbackPhotoLock(recipe)}`;
+  }
+
   function imageFor(recipe) {
-    // Prefer verified publisher food photography. If none is available, use a
-    // local generated representation of the prepared meal. The user's cookbook
-    // page photographs are never used as TONIGHT card or gallery images.
-    const publisherImage = publisherFoodImageFor(recipe);
-    const generatedImage = generatedFoodImageFor(recipe);
-    if (bookIdFor(recipe) === 'tonight') return publisherImage || generatedImage;
-    return publisherImage || generatedImage || cookbookFoodImageFor(recipe);
+    // Priority: verified publisher photo -> existing generated meal image ->
+    // stable Creative Commons food-search fallback. Cookbook-page photographs
+    // are never used as recipe-card cover images in either cookbook.
+    return publisherFoodImageFor(recipe) || generatedFoodImageFor(recipe) || fallbackWebFoodImageFor(recipe);
   }
 
   function displayedImageFor(recipe) {
@@ -335,8 +369,7 @@
     if (mealPhotoUrls[recipe.id]) return 'mine';
     if (publisherFoodImageFor(recipe)) return 'publisher';
     if (generatedFoodImageFor(recipe)) return 'generated';
-    if (bookIdFor(recipe) !== 'tonight' && cookbookFoodImageFor(recipe)) return 'cookbook-food';
-    return '';
+    return 'web-fallback';
   }
 
   function publicImageCandidates(recipe) {
@@ -679,8 +712,10 @@
 
   function photoMarkup(recipe, className = '') {
     const image = displayedImageFor(recipe);
+    const backup = mealPhotoUrls[recipe.id] ? imageFor(recipe) : fallbackWebFoodImageFor(recipe);
+    const backupAttr = backup && backup !== image ? ` data-backup-image="${esc(backup)}"` : '';
     return image
-      ? `<img class="${esc(className)}" loading="lazy" src="${esc(image)}" alt="${esc(recipe.title)}" data-image-fallback>`
+      ? `<img class="${esc(className)}" loading="lazy" src="${esc(image)}" alt="${esc(recipe.title)}" data-image-fallback${backupAttr}>`
       : '<span class="emoji">🍲</span>';
   }
 
@@ -745,7 +780,7 @@
       ? galleryRecipes.map(recipe => `
         <button class="gallery-card" data-open="${recipe.id}">
           ${photoMarkup(recipe)}
-          <span class="gallery-caption"><strong>${esc(recipe.title)}</strong><small>${esc(imageKindFor(recipe) === 'mine' ? 'My meal photo' : imageKindFor(recipe) === 'publisher' ? 'Website photo' : imageKindFor(recipe) === 'generated' ? 'Prepared-meal image' : imageKindFor(recipe) === 'cookbook-food' ? 'Cookbook food photo' : 'Cookbook scan')}</small></span>
+          <span class="gallery-caption"><strong>${esc(recipe.title)}</strong><small>${esc(imageKindFor(recipe) === 'mine' ? 'My meal photo' : imageKindFor(recipe) === 'publisher' ? 'Website photo' : imageKindFor(recipe) === 'generated' ? 'Prepared-meal image' : 'Creative Commons food photo')}</small></span>
         </button>`).join('')
       : '<div class="empty">No food photos match those filters. Cookbook page scans are kept inside each recipe for reference and are not used as cover photos.</div>';
     bindRecipeCards();
@@ -763,6 +798,12 @@
     });
     $$('[data-image-fallback]').forEach(image => {
       image.onerror = () => {
+        const backup = image.dataset.backupImage;
+        if (backup && image.dataset.backupTried !== '1') {
+          image.dataset.backupTried = '1';
+          image.src = backup;
+          return;
+        }
         const parent = image.parentElement;
         image.remove();
         if (parent && !parent.querySelector('.emoji')) parent.insertAdjacentHTML('beforeend', '<span class="emoji">🍲</span>');
@@ -1625,30 +1666,33 @@
   }
 
   async function cacheBundledFoodPhotos() {
-    if (!STATIC_ASSETS.length || !('caches' in window)) {
-      toast('No generated food photos are available yet');
+    if (!('caches' in window)) {
+      toast('Offline photo caching is not available in this browser');
       return;
     }
     const button = $('#cacheStaticPhotos');
     const status = $('#photoCacheStatus');
+    const recipePhotos = allRecipes().map(recipe => imageFor(recipe)).filter(Boolean);
+    const photoAssets = [...new Set([...STATIC_ASSETS, ...recipePhotos])];
     button.disabled = true;
     let cached = 0;
     try {
-      const cache = await caches.open('dinner-recipes-v9-static-photos');
-      for (let index = 0; index < STATIC_ASSETS.length; index += 6) {
-        const batch = STATIC_ASSETS.slice(index, index + 6);
+      const cache = await caches.open('dinner-recipes-v18-all-food-photos');
+      for (let index = 0; index < photoAssets.length; index += 6) {
+        const batch = photoAssets.slice(index, index + 6);
         await Promise.allSettled(batch.map(async path => {
-          const request = new Request(path, { cache: 'reload' });
+          const remote = /^https?:\/\//i.test(path);
+          const request = new Request(path, { cache: 'reload', mode: remote ? 'no-cors' : 'same-origin' });
           const existing = await cache.match(request);
           if (!existing) {
             const response = await fetch(request);
-            if (response.ok) await cache.put(request, response.clone());
+            if (response.ok || response.type === 'opaque') await cache.put(request, response.clone());
           }
           cached += 1;
         }));
-        status.textContent = `Saving food photos ${Math.min(index + batch.length, STATIC_ASSETS.length)} of ${STATIC_ASSETS.length}…`;
+        status.textContent = `Saving food photos ${Math.min(index + batch.length, photoAssets.length)} of ${photoAssets.length}…`;
       }
-      status.textContent = `${cached} bundled food photos are ready for offline use.`;
+      status.textContent = `${cached} food photos are ready for offline use.`;
       toast('Food photos saved for offline use');
     } catch (error) {
       status.textContent = 'Photo caching was interrupted. Tap the button to resume.';
@@ -1687,8 +1731,7 @@
     const cacheButton = $('#cacheStaticPhotos');
     if (cacheButton) cacheButton.disabled = STATIC_ASSETS.length === 0;
     const photoStatus = $('#photoCacheStatus');
-    if (photoStatus && STATIC_ASSETS.length === 0) photoStatus.textContent = 'Food photos will become available after the GitHub library build finishes.';
-    else if (photoStatus && !/Saving|ready|interrupted/i.test(photoStatus.textContent)) photoStatus.textContent = `${STATIC_ASSETS.length} bundled food photos are available to save offline.`;
+    if (photoStatus && !/Saving|ready|interrupted/i.test(photoStatus.textContent)) photoStatus.textContent = `${allRecipes().length} recipe photos are available; save them once for full offline coverage.`;
   }
 
 
@@ -1899,7 +1942,7 @@
     loadAllMealPhotos();
     resolvePublicFoodImages();
     window.addEventListener('pageshow', () => { if (!syncRunning) resetSyncUI(); });
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js?v=15').catch(console.warn);
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js?v=18').catch(console.warn);
   }
 
   init();
