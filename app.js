@@ -317,48 +317,77 @@
     return GENERATED_FOOD_IMAGES[String(recipe.id)] || '';
   }
 
-  // Full-library fallback: every recipe receives a stable prepared-food photo
-  // without requiring an API key. LoremFlickr serves Creative Commons Flickr
-  // photos, supports keyword searches, and can lock a URL to a stable result.
-  const FALLBACK_PHOTO_STOP_WORDS = new Set([
-    'the','and','with','from','into','your','this','that','for','plus','style','recipe',
-    'easy','quick','speedy','simple','best','perfect','amazing','magnificent','ultimate',
-    'minute','minutes','second','seconds','one','two','three','four','five','my','our',
-    'of','to','in','on','at','by','pan','pot','baked','crispy','creamy'
-  ]);
+  // Full-library photo fallback (v19): when no verified publisher photo or
+  // bundled generated photo exists, create a recipe-specific AI food-photo URL
+  // from the exact recipe title plus a few of its ingredients. This deliberately
+  // avoids generic stock-photo search services, which can return irrelevant images.
 
-  function fallbackPhotoKeywords(recipe) {
-    const titleTokens = slugify(recipe.title || '')
-      .split('-')
-      .filter(token => token.length > 2 && !/^\d+$/.test(token) && !FALLBACK_PHOTO_STOP_WORDS.has(token));
-    const ingredientTokens = (recipe.ingredients || [])
-      .slice(0, 8)
-      .flatMap(item => slugify(typeof item === 'string' ? item : (item.item || '')).split('-'))
-      .filter(token => token.length > 3 && !/^\d+$/.test(token) && !FALLBACK_PHOTO_STOP_WORDS.has(token));
-    const useful = [...new Set([...titleTokens, ...ingredientTokens])].slice(0, 5);
-    return ['food', 'meal', ...useful];
-  }
-
-  function fallbackPhotoLock(recipe) {
-    const text = `${recipe.id}|${recipe.title || ''}`;
+  function aiPhotoSeed(recipe) {
+    const text = `${recipe.id}|${recipe.title || ''}|food-photo-v19`;
     let hash = 2166136261;
     for (let index = 0; index < text.length; index += 1) {
       hash ^= text.charCodeAt(index);
       hash = Math.imul(hash, 16777619);
     }
-    return ((hash >>> 0) % 2000000000) + 1;
+    return ((hash >>> 0) % 2147483000) + 1;
   }
 
-  function fallbackWebFoodImageFor(recipe) {
-    const keywords = fallbackPhotoKeywords(recipe).map(encodeURIComponent).join(',');
-    return `https://loremflickr.com/640/420/${keywords}?lock=${fallbackPhotoLock(recipe)}`;
+  function cleanPromptIngredient(value) {
+    return String(value || '')
+      .replace(/^\s*[\d\s¼½¾⅓⅔⅛⅜⅝⅞./-]+\s*(?:g|kg|ml|l|oz|lb|lbs|tbsp|tsp|cups?|cloves?|cans?|packets?|pieces?)?\s*/i, '')
+      .replace(/\([^)]*\)/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function recipeIngredientHints(recipe) {
+    const raw = Array.isArray(recipe.ingredients) ? recipe.ingredients : [];
+    const hints = [];
+    for (const entry of raw) {
+      const value = typeof entry === 'string' ? entry : (entry?.item || entry?.name || '');
+      const cleaned = cleanPromptIngredient(value);
+      if (!cleaned || cleaned.length < 3) continue;
+      if (/^(salt|pepper|water|oil|olive oil|cooking spray)$/i.test(cleaned)) continue;
+      if (!hints.some(existing => existing.toLowerCase() === cleaned.toLowerCase())) hints.push(cleaned);
+      if (hints.length >= 6) break;
+    }
+    return hints;
+  }
+
+  function fallbackAiFoodImageFor(recipe) {
+    const ingredients = recipeIngredientHints(recipe);
+    const ingredientText = ingredients.length ? ` Main visible ingredients: ${ingredients.join(', ')}.` : '';
+    const prompt = [
+      `Photorealistic cookbook food photography of the finished dish called "${recipe.title || 'recipe'}".`,
+      ingredientText,
+      'Show the actual prepared meal as the main subject on a plate, bowl, baking dish, or serving platter as appropriate.',
+      'Match the named dish and ingredients closely. Appetizing realistic home-cooked food, natural kitchen lighting, three-quarter close-up, clean neutral background.',
+      'No text, no labels, no packaging, no people, no hands, no pets, no statues, no streets, no scenery, no unrelated objects.'
+    ].join(' ');
+    const encoded = encodeURIComponent(prompt);
+    return `https://pollinations.ai/p/${encoded}?width=640&height=420&seed=${aiPhotoSeed(recipe)}&model=flux&nologo=true`;
+  }
+
+  function recipeTitleFallbackImage(recipe) {
+    const title = String(recipe.title || 'Recipe').replace(/[<>&"']/g, '').slice(0, 48);
+    const lower = title.toLowerCase();
+    const icon = /cake|pudding|cookie|brownie|dessert|sweet|tart|pie|loaf/.test(lower) ? '🍰'
+      : /salad|slaw|vegetable|veggie|greens/.test(lower) ? '🥗'
+      : /pasta|noodle|spaghetti|linguine|macaroni/.test(lower) ? '🍝'
+      : /soup|stew|curry|chili/.test(lower) ? '🍲'
+      : /fish|salmon|prawn|shrimp|seafood|tuna/.test(lower) ? '🐟'
+      : /chicken|turkey/.test(lower) ? '🍗'
+      : /beef|steak|lamb|pork|sausage|kofta/.test(lower) ? '🍽️'
+      : /pizza|bread|flatbread/.test(lower) ? '🍕' : '🍴';
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="420" viewBox="0 0 640 420"><rect width="640" height="420" fill="#eee5da"/><text x="320" y="178" text-anchor="middle" font-size="92">${icon}</text><text x="320" y="265" text-anchor="middle" font-family="Arial,sans-serif" font-weight="700" font-size="28" fill="#392f2a">${title}</text><text x="320" y="305" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" fill="#6f625b">Food photo temporarily unavailable</text></svg>`;
+    return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
   }
 
   function imageFor(recipe) {
     // Priority: verified publisher photo -> existing generated meal image ->
     // stable Creative Commons food-search fallback. Cookbook-page photographs
     // are never used as recipe-card cover images in either cookbook.
-    return publisherFoodImageFor(recipe) || generatedFoodImageFor(recipe) || fallbackWebFoodImageFor(recipe);
+    return publisherFoodImageFor(recipe) || generatedFoodImageFor(recipe) || fallbackAiFoodImageFor(recipe);
   }
 
   function displayedImageFor(recipe) {
@@ -369,7 +398,7 @@
     if (mealPhotoUrls[recipe.id]) return 'mine';
     if (publisherFoodImageFor(recipe)) return 'publisher';
     if (generatedFoodImageFor(recipe)) return 'generated';
-    return 'web-fallback';
+    return 'generated';
   }
 
   function publicImageCandidates(recipe) {
@@ -712,11 +741,14 @@
 
   function photoMarkup(recipe, className = '') {
     const image = displayedImageFor(recipe);
-    const backup = mealPhotoUrls[recipe.id] ? imageFor(recipe) : fallbackWebFoodImageFor(recipe);
+    const aiBackup = fallbackAiFoodImageFor(recipe);
+    const finalBackup = recipeTitleFallbackImage(recipe);
+    const backup = image !== aiBackup ? aiBackup : finalBackup;
+    const finalAttr = backup !== finalBackup ? ` data-final-backup-image="${esc(finalBackup)}"` : '';
     const backupAttr = backup && backup !== image ? ` data-backup-image="${esc(backup)}"` : '';
     return image
-      ? `<img class="${esc(className)}" loading="lazy" src="${esc(image)}" alt="${esc(recipe.title)}" data-image-fallback${backupAttr}>`
-      : '<span class="emoji">🍲</span>';
+      ? `<img class="${esc(className)}" loading="lazy" src="${esc(image)}" alt="${esc(recipe.title)}" data-image-fallback${backupAttr}${finalAttr}>`
+      : `<img class="${esc(className)}" loading="lazy" src="${esc(finalBackup)}" alt="${esc(recipe.title)}">`;
   }
 
   function recipeCard(recipe) {
@@ -780,7 +812,7 @@
       ? galleryRecipes.map(recipe => `
         <button class="gallery-card" data-open="${recipe.id}">
           ${photoMarkup(recipe)}
-          <span class="gallery-caption"><strong>${esc(recipe.title)}</strong><small>${esc(imageKindFor(recipe) === 'mine' ? 'My meal photo' : imageKindFor(recipe) === 'publisher' ? 'Website photo' : imageKindFor(recipe) === 'generated' ? 'Prepared-meal image' : 'Creative Commons food photo')}</small></span>
+          <span class="gallery-caption"><strong>${esc(recipe.title)}</strong><small>${esc(imageKindFor(recipe) === 'mine' ? 'My meal photo' : imageKindFor(recipe) === 'publisher' ? 'Website photo' : imageKindFor(recipe) === 'generated' ? 'Recipe-specific food image' : 'Food image')}</small></span>
         </button>`).join('')
       : '<div class="empty">No food photos match those filters. Cookbook page scans are kept inside each recipe for reference and are not used as cover photos.</div>';
     bindRecipeCards();
@@ -802,6 +834,12 @@
         if (backup && image.dataset.backupTried !== '1') {
           image.dataset.backupTried = '1';
           image.src = backup;
+          return;
+        }
+        const finalBackup = image.dataset.finalBackupImage;
+        if (finalBackup && image.dataset.finalBackupTried !== '1') {
+          image.dataset.finalBackupTried = '1';
+          image.src = finalBackup;
           return;
         }
         const parent = image.parentElement;
@@ -915,9 +953,15 @@
       ? Object.entries(recipe.nutrition).map(([key, value]) => `<div><strong>${esc(key)}:</strong> ${esc(value)}</div>`).join('')
       : `<p class="muted">${esc(recipe.nutrition_status || 'Nutrition information is not available for this entry.')}</p>`;
     const sourceLink = recipe.source_url ? `<a href="${esc(recipe.source_url)}" target="_blank" rel="noopener">Publisher page</a>` : '';
-    const hero = displayedImageFor(recipe)
-      ? `<img src="${esc(displayedImageFor(recipe))}" alt="${esc(recipe.title)}" data-image-fallback>`
-      : '<span style="font-size:5rem">🍲</span>';
+    const heroImage = displayedImageFor(recipe);
+    const heroAiBackup = fallbackAiFoodImageFor(recipe);
+    const heroFinalBackup = recipeTitleFallbackImage(recipe);
+    const heroBackup = heroImage !== heroAiBackup ? heroAiBackup : heroFinalBackup;
+    const heroFinalAttr = heroBackup !== heroFinalBackup ? ` data-final-backup-image="${esc(heroFinalBackup)}"` : '';
+    const heroBackupAttr = heroBackup && heroBackup !== heroImage ? ` data-backup-image="${esc(heroBackup)}"` : '';
+    const hero = heroImage
+      ? `<img src="${esc(heroImage)}" alt="${esc(recipe.title)}" data-image-fallback${heroBackupAttr}${heroFinalAttr}>`
+      : `<img src="${esc(heroFinalBackup)}" alt="${esc(recipe.title)}">`;
 
     $('#modalContent').innerHTML = `
       <div class="detail-hero">${hero}</div>
@@ -1677,7 +1721,7 @@
     button.disabled = true;
     let cached = 0;
     try {
-      const cache = await caches.open('dinner-recipes-v18-all-food-photos');
+      const cache = await caches.open('dinner-recipes-v19-recipe-specific-food-photos');
       for (let index = 0; index < photoAssets.length; index += 6) {
         const batch = photoAssets.slice(index, index + 6);
         await Promise.allSettled(batch.map(async path => {
