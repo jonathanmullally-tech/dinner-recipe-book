@@ -19,10 +19,10 @@
     shopping: 'rt_shopping_v3',
     shoppingChecked: 'rt_checked_v3',
     ingredientChecked: 'rt_recipe_checked_v4',
-    publicImages: 'rt_public_food_images_v2',
-    publicImageChecks: 'rt_public_food_image_checks_v21',
-    publicImageCredits: 'rt_public_food_image_credits_v21',
-    publicImageFailures: 'rt_public_food_image_failures_v21'
+    publicImages: 'rt_public_food_images_v3',
+    publicImageChecks: 'rt_public_food_image_checks_v22',
+    publicImageCredits: 'rt_public_food_image_credits_v22',
+    publicImageFailures: 'rt_public_food_image_failures_v22'
   };
 
   const load = (key, fallback) => {
@@ -385,6 +385,12 @@
     return '';
   }
 
+  function decodeHtml(value) {
+    const area = document.createElement('textarea');
+    area.innerHTML = String(value || '');
+    return area.value;
+  }
+
   function publicImageCandidates(recipe) {
     const title = String(recipe.title || '');
     const withoutParentheses = title.replace(/\s*\([^)]*\)\s*/g, ' ').trim();
@@ -423,24 +429,58 @@
     return hits / Math.max(1, titleTokens.length);
   }
 
-  function trustedRecipeImageCandidate(recipe, data, candidate) {
-    const pageTitle = String(data.title || '');
-    const image = data.image || {};
-    const imageUrl = String(image.url || '');
-    const finalUrl = String(data.url || candidate.url || '');
-    let host = '';
-    try { host = new URL(finalUrl).hostname; } catch {}
-    const hostTrusted = /(^|\.)recipetineats\.com$/i.test(host);
-    if (!hostTrusted) return '';
-    if (!/^https?:\/\//i.test(imageUrl) || isSuspiciousImage(imageUrl)) return '';
-    if (/404|not found|page not found/i.test(pageTitle)) return '';
-    const titleScore = overlapScore(recipe.title, pageTitle);
-    const pathScore = urlScore(finalUrl, recipe.title);
-    const largeEnough = !image.width || !image.height || Math.max(Number(image.width), Number(image.height)) >= 500;
-    const goodMatch = candidate.trusted
-      ? (pathScore >= 0.45 || titleScore >= 0.35)
-      : (pathScore >= 0.72 || (pathScore >= 0.55 && titleScore >= 0.28) || titleScore >= 0.58);
-    return largeEnough && goodMatch ? imageUrl : '';
+  function recipeTitleMatchScore(recipe, candidateTitle, candidateUrl = '') {
+    const titleScore = overlapScore(recipe.title, decodeHtml(candidateTitle));
+    const pathScore = urlScore(candidateUrl, recipe.title);
+    return Math.max(titleScore, pathScore, (titleScore * 0.65) + (pathScore * 0.35));
+  }
+
+  function extractWpImage(post) {
+    const yoast = post?.yoast_head_json?.og_image;
+    if (Array.isArray(yoast)) {
+      const image = yoast.find(item => /^https?:\/\//i.test(String(item?.url || '')) && !isSuspiciousImage(item.url));
+      if (image?.url) return image.url;
+    }
+    const embedded = post?._embedded?.['wp:featuredmedia'];
+    if (Array.isArray(embedded)) {
+      const media = embedded.find(item => /^https?:\/\//i.test(String(item?.source_url || '')) && !isSuspiciousImage(item.source_url));
+      if (media?.source_url) return media.source_url;
+    }
+    const jetpack = post?.jetpack_featured_media_url;
+    if (/^https?:\/\//i.test(String(jetpack || '')) && !isSuspiciousImage(jetpack)) return jetpack;
+    return '';
+  }
+
+  async function recipeTinWordPressFoodImage(recipe) {
+    const query = String(recipe.title || '').replace(/\([^)]*\)/g, ' ').replace(/[—–:]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!query) return null;
+    const searchUrl = `https://www.recipetineats.com/wp-json/wp/v2/search?search=${encodeURIComponent(query)}&per_page=10&_fields=id,title,url,subtype`;
+    const response = await fetch(searchUrl, { cache: 'force-cache' });
+    if (!response.ok) throw new Error(`RecipeTin search failed (${response.status})`);
+    const results = await response.json();
+    let best = null;
+    for (const result of Array.isArray(results) ? results : []) {
+      const resultTitle = decodeHtml(result?.title || '');
+      const resultUrl = String(result?.url || '');
+      if (!/recipetineats\.com/i.test(resultUrl)) continue;
+      const score = recipeTitleMatchScore(recipe, resultTitle, resultUrl);
+      if (!best || score > best.score) best = { result, score, resultTitle, resultUrl };
+    }
+    if (!best || best.score < 0.56) return null;
+
+    const subtype = String(best.result?.subtype || 'post').replace(/[^a-z0-9_-]/gi, '') || 'post';
+    const route = subtype === 'page' ? 'pages' : `${subtype}s`;
+    const postUrl = `https://www.recipetineats.com/wp-json/wp/v2/${route}/${best.result.id}?_embed=wp:featuredmedia`;
+    const postResponse = await fetch(postUrl, { cache: 'force-cache' });
+    if (!postResponse.ok) throw new Error(`RecipeTin post lookup failed (${postResponse.status})`);
+    const post = await postResponse.json();
+    const postTitle = decodeHtml(post?.title?.rendered || best.resultTitle);
+    const postLink = String(post?.link || best.resultUrl);
+    const verifiedScore = recipeTitleMatchScore(recipe, postTitle, postLink);
+    if (verifiedScore < 0.56) return null;
+    const imageUrl = extractWpImage(post);
+    if (!imageUrl) return null;
+    return { url: imageUrl, landingUrl: postLink || best.resultUrl, title: postTitle, score: verifiedScore };
   }
 
   async function metadataFoodImage(recipe, candidate) {
@@ -449,12 +489,21 @@
     if (!response.ok) throw new Error(`Metadata request failed (${response.status})`);
     const payload = await response.json();
     const data = payload?.data || {};
-    return trustedRecipeImageCandidate(recipe, data, candidate);
+    const pageTitle = decodeHtml(data.title || '');
+    const image = data.image || {};
+    const imageUrl = String(image.url || '');
+    const finalUrl = String(data.url || candidate.url || '');
+    if (!/^https?:\/\//i.test(imageUrl) || isSuspiciousImage(imageUrl)) return '';
+    if (/404|not found|page not found/i.test(pageTitle)) return '';
+    const score = recipeTitleMatchScore(recipe, pageTitle, finalUrl);
+    const largeEnough = !image.width || !image.height || Math.max(Number(image.width), Number(image.height)) >= 500;
+    const required = /recipetineats\.com/i.test(finalUrl) ? 0.52 : 0.68;
+    return largeEnough && score >= required ? imageUrl : '';
   }
 
   async function resolvePublicFoodImages() {
     if (publicImageLookupRunning || !navigator.onLine) return;
-    const retryAfterMs = 24 * 60 * 60 * 1000;
+    const retryAfterMs = 6 * 60 * 60 * 1000;
     const now = Date.now();
     const allMissing = BASE.filter(baseRecipe => {
       const recipe = mergeRecipe(baseRecipe);
@@ -475,7 +524,7 @@
     });
     if (!allMissing.length) return;
 
-    const queue = allMissing.slice(0, 36);
+    const queue = allMissing.slice(0, 48);
     publicImageLookupRunning = true;
     let nextIndex = 0;
     let added = 0;
@@ -486,38 +535,62 @@
         const recipe = mergeRecipe(baseRecipe);
         const id = String(recipe.id);
         let found = false;
-        for (const candidate of publicImageCandidates(recipe)) {
-          try {
-            const imageUrl = await metadataFoodImage(recipe, candidate);
-            if (imageUrl) {
-              publicImages[id] = imageUrl;
-              publicImageCredits[id] = {
-                source: 'RecipeTin Eats',
-                landing_url: candidate.url
-              };
-              publicImageChecks[id] = Date.now();
-              delete publicImageFailures[id];
-              added += 1;
-              found = true;
-              break;
+
+        // First choice: RecipeTin's own WordPress data. This avoids generic
+        // image-search guesses and gives us the featured/OG image for the
+        // exact matching recipe page.
+        try {
+          const official = await recipeTinWordPressFoodImage(recipe);
+          if (official?.url) {
+            publicImages[id] = official.url;
+            publicImageCredits[id] = { source: 'RecipeTin Eats', landing_url: official.landingUrl || '' };
+            publicImageChecks[id] = Date.now();
+            delete publicImageFailures[id];
+            added += 1;
+            found = true;
+          }
+        } catch (error) {
+          console.warn(`RecipeTin WordPress image lookup failed for ${recipe.title}`, error);
+        }
+
+        // Backup only for verified/likely publisher pages. No generic stock
+        // image or Openverse fallback: a missing image is preferable to a
+        // wrong image.
+        if (!found) {
+          for (const candidate of publicImageCandidates(recipe)) {
+            try {
+              const imageUrl = await metadataFoodImage(recipe, candidate);
+              if (imageUrl) {
+                publicImages[id] = imageUrl;
+                publicImageCredits[id] = {
+                  source: /recipetineats\.com/i.test(candidate.url) ? 'RecipeTin Eats' : 'Publisher page',
+                  landing_url: candidate.url
+                };
+                publicImageChecks[id] = Date.now();
+                delete publicImageFailures[id];
+                added += 1;
+                found = true;
+                break;
+              }
+            } catch (error) {
+              console.warn(`Verified publisher image lookup failed for ${recipe.title}`, candidate.url, error);
             }
-          } catch (error) {
-            console.warn(`Publisher food photo candidate failed for ${recipe.title}`, candidate.url, error);
           }
         }
+
         if (!found) publicImageChecks[id] = Date.now();
       }
     };
 
     try {
-      await Promise.all(Array.from({ length: Math.min(3, queue.length) }, () => worker()));
+      await Promise.all(Array.from({ length: Math.min(4, queue.length) }, () => worker()));
       save(KEYS.publicImages, publicImages);
       save(KEYS.publicImageChecks, publicImageChecks);
       save(KEYS.publicImageCredits, publicImageCredits);
       save(KEYS.publicImageFailures, publicImageFailures);
       if (added) {
         render();
-        toast(`${added} correct recipe photo${added === 1 ? '' : 's'} added`);
+        toast(`${added} verified recipe photo${added === 1 ? '' : 's'} added`);
       }
     } finally {
       publicImageLookupRunning = false;
@@ -525,7 +598,7 @@
         const recipe = mergeRecipe(baseRecipe);
         return !publisherFoodImageFor(recipe) && !generatedFoodImageFor(recipe) && !publicImageChecks[String(recipe.id)];
       });
-      if (remaining && navigator.onLine) setTimeout(resolvePublicFoodImages, 5000);
+      if (remaining && navigator.onLine) setTimeout(resolvePublicFoodImages, 3500);
     }
   }
 
@@ -536,7 +609,7 @@
       delete publicImages[key];
       delete publicImageCredits[key];
       delete publicImageChecks[key];
-      publicImageFailures[key] = Date.now() + 2 * 60 * 60 * 1000;
+      publicImageFailures[key] = Date.now() + 30 * 60 * 1000;
       save(KEYS.publicImages, publicImages);
       save(KEYS.publicImageChecks, publicImageChecks);
       save(KEYS.publicImageCredits, publicImageCredits);
