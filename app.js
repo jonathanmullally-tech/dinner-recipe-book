@@ -20,7 +20,8 @@
     shoppingChecked: 'rt_checked_v3',
     ingredientChecked: 'rt_recipe_checked_v4',
     publicImages: 'rt_public_food_images_v1',
-    publicImageChecks: 'rt_public_food_image_checks_v2'
+    publicImageChecks: 'rt_public_food_image_checks_v20',
+    publicImageCredits: 'rt_public_food_image_credits_v20'
   };
 
   const load = (key, fallback) => {
@@ -39,6 +40,7 @@
   let ingredientChecked = load(KEYS.ingredientChecked, {});
   let publicImages = load(KEYS.publicImages, {});
   let publicImageChecks = load(KEYS.publicImageChecks, {});
+  let publicImageCredits = load(KEYS.publicImageCredits, {});
   let publicImageLookupRunning = false;
   let cancelSync = false;
   let syncRunning = false;
@@ -317,20 +319,10 @@
     return GENERATED_FOOD_IMAGES[String(recipe.id)] || '';
   }
 
-  // Full-library photo fallback (v19): when no verified publisher photo or
-  // bundled generated photo exists, create a recipe-specific AI food-photo URL
-  // from the exact recipe title plus a few of its ingredients. This deliberately
-  // avoids generic stock-photo search services, which can return irrelevant images.
-
-  function aiPhotoSeed(recipe) {
-    const text = `${recipe.id}|${recipe.title || ''}|food-photo-v19`;
-    let hash = 2166136261;
-    for (let index = 0; index < text.length; index += 1) {
-      hash ^= text.charCodeAt(index);
-      hash = Math.imul(hash, 16777619);
-    }
-    return ((hash >>> 0) % 2147483000) + 1;
-  }
+  // Full-library photo resolver (v20): prefer the actual public image from
+  // RecipeTin Eats/publisher pages. If no exact publisher page is available,
+  // use Openverse (openly licensed media) as the general web-photo fallback.
+  // Never use photographs of cookbook pages as cover images.
 
   function cleanPromptIngredient(value) {
     return String(value || '')
@@ -349,23 +341,9 @@
       if (!cleaned || cleaned.length < 3) continue;
       if (/^(salt|pepper|water|oil|olive oil|cooking spray)$/i.test(cleaned)) continue;
       if (!hints.some(existing => existing.toLowerCase() === cleaned.toLowerCase())) hints.push(cleaned);
-      if (hints.length >= 6) break;
+      if (hints.length >= 4) break;
     }
     return hints;
-  }
-
-  function fallbackAiFoodImageFor(recipe) {
-    const ingredients = recipeIngredientHints(recipe);
-    const ingredientText = ingredients.length ? ` Main visible ingredients: ${ingredients.join(', ')}.` : '';
-    const prompt = [
-      `Photorealistic cookbook food photography of the finished dish called "${recipe.title || 'recipe'}".`,
-      ingredientText,
-      'Show the actual prepared meal as the main subject on a plate, bowl, baking dish, or serving platter as appropriate.',
-      'Match the named dish and ingredients closely. Appetizing realistic home-cooked food, natural kitchen lighting, three-quarter close-up, clean neutral background.',
-      'No text, no labels, no packaging, no people, no hands, no pets, no statues, no streets, no scenery, no unrelated objects.'
-    ].join(' ');
-    const encoded = encodeURIComponent(prompt);
-    return `https://pollinations.ai/p/${encoded}?width=640&height=420&seed=${aiPhotoSeed(recipe)}&model=flux&nologo=true`;
   }
 
   function recipeTitleFallbackImage(recipe) {
@@ -379,15 +357,66 @@
       : /chicken|turkey/.test(lower) ? '🍗'
       : /beef|steak|lamb|pork|sausage|kofta/.test(lower) ? '🍽️'
       : /pizza|bread|flatbread/.test(lower) ? '🍕' : '🍴';
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="420" viewBox="0 0 640 420"><rect width="640" height="420" fill="#eee5da"/><text x="320" y="178" text-anchor="middle" font-size="92">${icon}</text><text x="320" y="265" text-anchor="middle" font-family="Arial,sans-serif" font-weight="700" font-size="28" fill="#392f2a">${title}</text><text x="320" y="305" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" fill="#6f625b">Food photo temporarily unavailable</text></svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="420" viewBox="0 0 640 420"><rect width="640" height="420" fill="#eee5da"/><text x="320" y="178" text-anchor="middle" font-size="92">${icon}</text><text x="320" y="265" text-anchor="middle" font-family="Arial,sans-serif" font-weight="700" font-size="28" fill="#392f2a">${title}</text><text x="320" y="305" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" fill="#6f625b">Finding a matching food photo…</text></svg>`;
     return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
   }
 
+  function openverseQueryVariants(recipe) {
+    const title = String(recipe.title || '').trim();
+    const withoutParentheses = title.replace(/\s*\([^)]*\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
+    const beforeSubtitle = withoutParentheses.split(/[—–:]/)[0].trim();
+    const stop = new Set(['the','my','a','an','and','with','of','for','to','in','on','your','very','best','perfect','easy','quick','simple','amazing','magnificent','ultimate','most','really','great','recipe','style']);
+    const concise = slugify(beforeSubtitle).split('-').filter(token => token.length > 2 && !stop.has(token)).slice(0, 6).join(' ');
+    const ingredientHint = recipeIngredientHints(recipe).slice(0, 2).join(' ');
+    return [...new Set([title, withoutParentheses, beforeSubtitle, concise, [concise, ingredientHint].filter(Boolean).join(' ')].filter(value => value && value.length >= 3))];
+  }
+
+  function openverseFoodScore(recipe, result) {
+    const tags = Array.isArray(result?.tags) ? result.tags.map(tag => typeof tag === 'string' ? tag : tag?.name || '').join(' ') : '';
+    const haystack = `${result?.title || ''} ${tags}`.toLowerCase();
+    const recipeTokens = tokenSet(recipe.title);
+    let hits = 0;
+    for (const token of recipeTokens) if (haystack.includes(token)) hits += 1;
+    let score = hits / Math.max(1, recipeTokens.size);
+    if (/food|dish|meal|recipe|cooking|cuisine|restaurant|plate|bowl|chicken|beef|pork|lamb|fish|salmon|shrimp|prawn|rice|pasta|noodle|soup|stew|salad|cake|bread|pizza|curry|vegetable|dessert/.test(haystack)) score += 0.22;
+    if (/cat|dog|pet|statue|sculpture|street|car|vehicle|building|architecture|portrait|person|people|landscape|flower|painting|drawing|logo/.test(haystack)) score -= 0.75;
+    if (result?.mature) score -= 2;
+    return score;
+  }
+
+  async function openverseFoodImage(recipe) {
+    let best = null;
+    for (const query of openverseQueryVariants(recipe).slice(0, 4)) {
+      const endpoint = `https://api.openverse.org/v1/images/?q=${encodeURIComponent(query)}&page_size=12&mature=false`;
+      const response = await fetch(endpoint, { cache: 'force-cache' });
+      if (!response.ok) throw new Error(`Openverse request failed (${response.status})`);
+      const payload = await response.json();
+      for (const result of payload?.results || []) {
+        const imageUrl = result?.thumbnail || result?.url;
+        if (!/^https?:\/\//i.test(String(imageUrl || '')) || isSuspiciousImage(imageUrl)) continue;
+        const score = openverseFoodScore(recipe, result);
+        if (!best || score > best.score) best = { score, imageUrl, result };
+      }
+      if (best && best.score >= 0.62) break;
+    }
+    if (!best || best.score < 0.28) return null;
+    return {
+      url: best.imageUrl,
+      credit: {
+        creator: best.result?.creator || '',
+        creator_url: best.result?.creator_url || '',
+        source: best.result?.source || best.result?.provider || 'Openverse',
+        license: best.result?.license || '',
+        license_url: best.result?.license_url || '',
+        landing_url: best.result?.foreign_landing_url || ''
+      }
+    };
+  }
+
   function imageFor(recipe) {
-    // Priority: verified publisher photo -> existing generated meal image ->
-    // stable Creative Commons food-search fallback. Cookbook-page photographs
-    // are never used as recipe-card cover images in either cookbook.
-    return publisherFoodImageFor(recipe) || generatedFoodImageFor(recipe) || fallbackAiFoodImageFor(recipe);
+    // Priority: exact publisher/official public photo -> bundled generated meal image.
+    // A neutral title card is temporary while the public-photo resolver runs.
+    return publisherFoodImageFor(recipe) || generatedFoodImageFor(recipe) || recipeTitleFallbackImage(recipe);
   }
 
   function displayedImageFor(recipe) {
@@ -445,46 +474,77 @@
 
   async function resolvePublicFoodImages() {
     if (publicImageLookupRunning || !navigator.onLine) return;
-    const retryAfterMs = 21 * 24 * 60 * 60 * 1000;
+    const retryAfterMs = 3 * 24 * 60 * 60 * 1000;
     const now = Date.now();
-    const allMissing = BASE.filter(recipe => {
-      if (bookIdFor(recipe) !== 'tonight' || publisherFoodImageFor(recipe)) return false;
+    const allMissing = BASE.filter(baseRecipe => {
+      const recipe = mergeRecipe(baseRecipe);
+      if (publisherFoodImageFor(recipe) || generatedFoodImageFor(recipe)) return false;
       const lastCheck = Number(publicImageChecks[String(recipe.id)] || 0);
       return !lastCheck || now - lastCheck >= retryAfterMs;
-    }).sort((left, right) => {
+    }).sort((leftBase, rightBase) => {
+      const left = mergeRecipe(leftBase);
+      const right = mergeRecipe(rightBase);
+      const leftDinner = bookIdFor(left) === 'dinner' ? 0 : 1;
+      const rightDinner = bookIdFor(right) === 'dinner' ? 0 : 1;
       const leftPriority = left.source_url || PUBLIC_IMAGE_URL_HINTS[String(left.id)] ? 0 : 1;
       const rightPriority = right.source_url || PUBLIC_IMAGE_URL_HINTS[String(right.id)] ? 0 : 1;
-      return leftPriority - rightPriority || Number(left.book_page || 9999) - Number(right.book_page || 9999);
+      return leftDinner - rightDinner || leftPriority - rightPriority || Number(left.book_page || 9999) - Number(right.book_page || 9999);
     });
     if (!allMissing.length) return;
 
-    // Work in phone-friendly batches. When one batch completes, the next one
-    // starts automatically while the app remains open and online.
-    const queue = allMissing.slice(0, 30);
+    // Resolve in modest batches so a phone remains responsive. Dinner recipes
+    // are prioritized because RecipeTin Eats has public companion/video pages
+    // for the cookbook exclusives, including the images Google Images surfaces.
+    const queue = allMissing.slice(0, 24);
     publicImageLookupRunning = true;
     let nextIndex = 0;
     let added = 0;
 
     const worker = async () => {
       while (nextIndex < queue.length) {
-        const recipe = queue[nextIndex++];
+        const baseRecipe = queue[nextIndex++];
+        const recipe = mergeRecipe(baseRecipe);
         const id = String(recipe.id);
         let hadTransientFailure = false;
+        let found = false;
         try {
           for (const candidate of publicImageCandidates(recipe)) {
             try {
               const imageUrl = await metadataFoodImage(recipe, candidate);
               if (imageUrl) {
                 publicImages[id] = imageUrl;
+                publicImageCredits[id] = {
+                  source: /recipetineats\.com/i.test(candidate.url) ? 'RecipeTin Eats' : 'Publisher page',
+                  landing_url: candidate.url
+                };
                 added += 1;
+                found = true;
                 break;
               }
             } catch (error) {
               hadTransientFailure = true;
-              console.warn(`Food photo candidate failed for ${recipe.title}`, candidate.url, error);
+              console.warn(`Publisher food photo candidate failed for ${recipe.title}`, candidate.url, error);
             }
           }
-          if (!hadTransientFailure || publicImages[id]) publicImageChecks[id] = Date.now();
+
+          // If an exact publisher/RecipeTin companion image was not found,
+          // use Openverse rather than a random stock-photo endpoint.
+          if (!found) {
+            try {
+              const openverse = await openverseFoodImage(recipe);
+              if (openverse?.url) {
+                publicImages[id] = openverse.url;
+                publicImageCredits[id] = openverse.credit || {};
+                added += 1;
+                found = true;
+              }
+            } catch (error) {
+              hadTransientFailure = true;
+              console.warn(`Openverse food photo lookup failed for ${recipe.title}`, error);
+            }
+          }
+
+          if (!hadTransientFailure || found) publicImageChecks[id] = Date.now();
         } catch (error) {
           console.warn(`Food photo lookup failed for ${recipe.title}`, error);
         }
@@ -492,19 +552,21 @@
     };
 
     try {
-      await Promise.all(Array.from({ length: Math.min(3, queue.length) }, () => worker()));
+      await Promise.all(Array.from({ length: Math.min(2, queue.length) }, () => worker()));
       save(KEYS.publicImages, publicImages);
       save(KEYS.publicImageChecks, publicImageChecks);
+      save(KEYS.publicImageCredits, publicImageCredits);
       if (added) {
         render();
-        toast(`${added} more official food photo${added === 1 ? '' : 's'} added`);
+        toast(`${added} matching food photo${added === 1 ? '' : 's'} added`);
       }
     } finally {
       publicImageLookupRunning = false;
-      const remaining = BASE.some(recipe => bookIdFor(recipe) === 'tonight'
-        && !publisherFoodImageFor(recipe)
-        && !publicImageChecks[String(recipe.id)]);
-      if (remaining && navigator.onLine) setTimeout(resolvePublicFoodImages, 12000);
+      const remaining = BASE.some(baseRecipe => {
+        const recipe = mergeRecipe(baseRecipe);
+        return !publisherFoodImageFor(recipe) && !generatedFoodImageFor(recipe) && !publicImageChecks[String(recipe.id)];
+      });
+      if (remaining && navigator.onLine) setTimeout(resolvePublicFoodImages, 8000);
     }
   }
 
@@ -741,13 +803,10 @@
 
   function photoMarkup(recipe, className = '') {
     const image = displayedImageFor(recipe);
-    const aiBackup = fallbackAiFoodImageFor(recipe);
     const finalBackup = recipeTitleFallbackImage(recipe);
-    const backup = image !== aiBackup ? aiBackup : finalBackup;
-    const finalAttr = backup !== finalBackup ? ` data-final-backup-image="${esc(finalBackup)}"` : '';
-    const backupAttr = backup && backup !== image ? ` data-backup-image="${esc(backup)}"` : '';
+    const backupAttr = image && image !== finalBackup ? ` data-backup-image="${esc(finalBackup)}"` : '';
     return image
-      ? `<img class="${esc(className)}" loading="lazy" src="${esc(image)}" alt="${esc(recipe.title)}" data-image-fallback${backupAttr}${finalAttr}>`
+      ? `<img class="${esc(className)}" loading="lazy" src="${esc(image)}" alt="${esc(recipe.title)}" data-image-fallback${backupAttr}>`
       : `<img class="${esc(className)}" loading="lazy" src="${esc(finalBackup)}" alt="${esc(recipe.title)}">`;
   }
 
@@ -954,17 +1013,19 @@
       : `<p class="muted">${esc(recipe.nutrition_status || 'Nutrition information is not available for this entry.')}</p>`;
     const sourceLink = recipe.source_url ? `<a href="${esc(recipe.source_url)}" target="_blank" rel="noopener">Publisher page</a>` : '';
     const heroImage = displayedImageFor(recipe);
-    const heroAiBackup = fallbackAiFoodImageFor(recipe);
     const heroFinalBackup = recipeTitleFallbackImage(recipe);
-    const heroBackup = heroImage !== heroAiBackup ? heroAiBackup : heroFinalBackup;
-    const heroFinalAttr = heroBackup !== heroFinalBackup ? ` data-final-backup-image="${esc(heroFinalBackup)}"` : '';
-    const heroBackupAttr = heroBackup && heroBackup !== heroImage ? ` data-backup-image="${esc(heroBackup)}"` : '';
+    const heroBackupAttr = heroImage && heroImage !== heroFinalBackup ? ` data-backup-image="${esc(heroFinalBackup)}"` : '';
     const hero = heroImage
-      ? `<img src="${esc(heroImage)}" alt="${esc(recipe.title)}" data-image-fallback${heroBackupAttr}${heroFinalAttr}>`
+      ? `<img src="${esc(heroImage)}" alt="${esc(recipe.title)}" data-image-fallback${heroBackupAttr}>`
       : `<img src="${esc(heroFinalBackup)}" alt="${esc(recipe.title)}">`;
 
+    const photoCredit = publicImageCredits[String(recipe.id)] || null;
+    const photoCreditMarkup = photoCredit && imageKindFor(recipe) === 'publisher'
+      ? `<div class="muted" style="padding:6px 18px 0;font-size:12px">Photo: ${esc(photoCredit.creator || photoCredit.source || 'public source')}${photoCredit.license ? ` · ${esc(String(photoCredit.license).toUpperCase())}` : ''}${photoCredit.landing_url ? ` · <a href="${esc(photoCredit.landing_url)}" target="_blank" rel="noopener">source</a>` : ''}</div>`
+      : '';
+
     $('#modalContent').innerHTML = `
-      <div class="detail-hero">${hero}</div>
+      <div class="detail-hero">${hero}</div>${photoCreditMarkup}
       <div class="detail">
         <h2>${esc(recipe.title)}</h2>
         <div class="badges">
