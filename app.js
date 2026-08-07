@@ -49,6 +49,23 @@
 
   const COOKBOOK_FOOD_CROPS = {"118":"assets/book-crops/118.jpg","57":"assets/book-crops/57.jpg","45":"assets/book-crops/45.jpg","128":"assets/book-crops/128.jpg","56":"assets/book-crops/56.jpg","143":"assets/book-crops/143.jpg","120":"assets/book-crops/120.jpg","71":"assets/book-crops/71.jpg","69":"assets/book-crops/69.jpg","140":"assets/book-crops/140.jpg","32":"assets/book-crops/32.jpg","64":"assets/book-crops/64.jpg","65":"assets/book-crops/65.jpg","78":"assets/book-crops/78.jpg","61":"assets/book-crops/61.jpg","130":"assets/book-crops/130.jpg","26":"assets/book-crops/26.jpg","48":"assets/book-crops/48.jpg","60":"assets/book-crops/60.jpg","94":"assets/book-crops/94.jpg","52":"assets/book-crops/52.jpg","79":"assets/book-crops/79.jpg","44":"assets/book-crops/44.jpg","75":"assets/book-crops/75.jpg","43":"assets/book-crops/43.jpg","121":"assets/book-crops/121.jpg","38":"assets/book-crops/38.jpg","86":"assets/book-crops/86.jpg","35":"assets/book-crops/35.jpg","144":"assets/book-crops/144.jpg","116":"assets/book-crops/116.jpg","122":"assets/book-crops/122.jpg","14":"assets/book-crops/14.jpg","91":"assets/book-crops/91.jpg","92":"assets/book-crops/92.jpg","131":"assets/book-crops/131.jpg","53":"assets/book-crops/53.jpg","34":"assets/book-crops/34.jpg"};
 
+
+  // Local prepared-food images generated from the digitized recipe content.
+  // These are not photographs of the cookbook pages and are used only when
+  // a verified publisher food photograph is unavailable.
+  const GENERATED_FOOD_IMAGES = {
+    "179": "food-179.jpg",
+    "178": "food-178.jpg",
+    "1001": "food-1001.jpg",
+    "1002": "food-1002.jpg",
+    "1008": "food-1008.jpg",
+    "1009": "food-1009.jpg",
+    "1039": "food-1039.jpg",
+    "1041": "food-1041.jpg",
+    "1084": "food-1084.jpg",
+    "1123": "food-1123.jpg"
+  };
+
   // Official RecipeTin Eats pages whose public title differs from the TONIGHT
   // book title. These are used only for prepared-food images. Local cookbook
   // photographs are never considered for TONIGHT cards or galleries.
@@ -296,13 +313,18 @@
     return COOKBOOK_FOOD_CROPS[String(recipe.id)] || '';
   }
 
+  function generatedFoodImageFor(recipe) {
+    return GENERATED_FOOD_IMAGES[String(recipe.id)] || '';
+  }
+
   function imageFor(recipe) {
-    // TONIGHT covers use only public publisher food photographs. The user's
-    // cookbook-page photographs remain source scans inside the recipe and are
-    // never used as TONIGHT card or gallery images.
+    // Prefer verified publisher food photography. If none is available, use a
+    // local generated representation of the prepared meal. The user's cookbook
+    // page photographs are never used as TONIGHT card or gallery images.
     const publisherImage = publisherFoodImageFor(recipe);
-    if (bookIdFor(recipe) === 'tonight') return publisherImage;
-    return publisherImage || cookbookFoodImageFor(recipe);
+    const generatedImage = generatedFoodImageFor(recipe);
+    if (bookIdFor(recipe) === 'tonight') return publisherImage || generatedImage;
+    return publisherImage || generatedImage || cookbookFoodImageFor(recipe);
   }
 
   function displayedImageFor(recipe) {
@@ -312,6 +334,7 @@
   function imageKindFor(recipe) {
     if (mealPhotoUrls[recipe.id]) return 'mine';
     if (publisherFoodImageFor(recipe)) return 'publisher';
+    if (generatedFoodImageFor(recipe)) return 'generated';
     if (bookIdFor(recipe) !== 'tonight' && cookbookFoodImageFor(recipe)) return 'cookbook-food';
     return '';
   }
@@ -722,7 +745,7 @@
       ? galleryRecipes.map(recipe => `
         <button class="gallery-card" data-open="${recipe.id}">
           ${photoMarkup(recipe)}
-          <span class="gallery-caption"><strong>${esc(recipe.title)}</strong><small>${esc(imageKindFor(recipe) === 'mine' ? 'My meal photo' : imageKindFor(recipe) === 'publisher' ? 'Website photo' : imageKindFor(recipe) === 'cookbook-food' ? 'Cookbook food photo' : 'Cookbook scan')}</small></span>
+          <span class="gallery-caption"><strong>${esc(recipe.title)}</strong><small>${esc(imageKindFor(recipe) === 'mine' ? 'My meal photo' : imageKindFor(recipe) === 'publisher' ? 'Website photo' : imageKindFor(recipe) === 'generated' ? 'Prepared-meal image' : imageKindFor(recipe) === 'cookbook-food' ? 'Cookbook food photo' : 'Cookbook scan')}</small></span>
         </button>`).join('')
       : '<div class="empty">No food photos match those filters. Cookbook page scans are kept inside each recipe for reference and are not used as cover photos.</div>';
     bindRecipeCards();
